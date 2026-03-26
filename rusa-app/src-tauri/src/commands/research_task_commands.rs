@@ -1,4 +1,4 @@
-use crate::auth::{permissions, validate_session_command};
+use crate::auth::{is_admin, permissions, validate_session_command};
 use crate::db;
 use crate::queries::auth::write_audit_log;
 use uuid::Uuid;
@@ -49,7 +49,7 @@ pub async fn assign_research_task(
     due_date: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
-    if session.role_name != "the_observer" && session.role_name != "the_artificer" && session.role_name != "the_taskmaster" {
+    if session.role_name != "the_observer" && session.role_name != "the_artificer" && session.role_name != "the_taskmaster" && !is_admin(&session) {
         return Err("Only the_observer, the_artificer, or the_taskmaster can assign research tasks".to_string());
     }
 
@@ -179,7 +179,7 @@ pub async fn submit_research_task_result(
 #[tauri::command]
 pub async fn complete_research_task(token: String, task_id: String) -> Result<(), String> {
     let session = validate_session_command(&token).await?;
-    if session.role_name != "the_observer" && session.role_name != "the_artificer" && session.role_name != "the_taskmaster" {
+    if session.role_name != "the_observer" && session.role_name != "the_artificer" && session.role_name != "the_taskmaster" && !is_admin(&session) {
         return Err(
             "Only the_observer, the_artificer, or the_taskmaster can mark research tasks as completed".to_string(),
         );

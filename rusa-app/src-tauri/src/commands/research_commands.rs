@@ -1,4 +1,4 @@
-use crate::auth::{require_role, validate_session_command};
+use crate::auth::{is_admin, require_role, validate_session_command};
 use crate::db;
 use crate::queries::auth::write_audit_log;
 use uuid::Uuid;
@@ -387,7 +387,7 @@ pub async fn approve_experiment_conclusion(
 ) -> Result<(), String> {
     let session = validate_session_command(&token).await?;
 
-    if session.role_name != "the_taskmaster" {
+    if session.role_name != "the_taskmaster" && !is_admin(&session) {
         return Err("Only the Taskmaster can approve experiment conclusions".to_string());
     }
 
@@ -513,7 +513,7 @@ pub async fn propose_species_from_discovery(
 pub async fn get_observer_dashboard(token: String) -> Result<serde_json::Value, String> {
     let session = validate_session_command(&token).await?;
 
-    if session.role_name != "the_observer" {
+    if session.role_name != "the_observer" && !is_admin(&session) {
         return Err("Only the Observer can access this dashboard".to_string());
     }
 
@@ -560,7 +560,7 @@ pub async fn assign_experiment_task(
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
 
-    if session.role_name != "the_observer" {
+    if session.role_name != "the_observer" && !is_admin(&session) {
         return Err("Only the Observer can assign experiment tasks".to_string());
     }
 

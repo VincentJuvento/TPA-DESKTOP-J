@@ -5,6 +5,7 @@
   import Field from '$lib/components/Field.svelte';
   import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
+  import { canPerform } from '$lib/stores/permissions';
   import { researchApi, researchTaskApi, userApi, aerospaceApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
@@ -123,18 +124,18 @@
   let observerDashboardLoading = $state(false);
 
   const canAssignResearchTasks = $derived(
-    $session?.role_name === 'the_observer' ||
-    $session?.role_name === 'the_artificer' ||
-    $session?.role_name === 'the_taskmaster'
+    canPerform($session, 'the_observer') ||
+    canPerform($session, 'the_artificer') ||
+    canPerform($session, 'the_taskmaster')
   );
 
-  const isTaskmaster = $derived($session?.role_name === 'the_taskmaster');
-  const isObserver = $derived($session?.role_name === 'the_observer');
+  const isTaskmaster = $derived(canPerform($session, 'the_taskmaster'));
+  const isObserver = $derived(canPerform($session, 'the_observer'));
   const isResearchEngineer = $derived(
-    $session?.role_name === 'biological_engineer' ||
-    $session?.role_name === 'agricultural_engineer'
+    canPerform($session, 'biological_engineer') ||
+    canPerform($session, 'agricultural_engineer')
   );
-  const isAgriculturalEngineer = $derived($session?.role_name === 'agricultural_engineer');
+  const isAgriculturalEngineer = $derived(canPerform($session, 'agricultural_engineer'));
 
   const canReviewExperiment = $derived(
     $session?.role_name === 'the_observer' ||

@@ -5,6 +5,7 @@
   import Field from '$lib/components/Field.svelte';
   import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
+  import { canPerform } from '$lib/stores/permissions';
   import { psychiatryApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
@@ -46,7 +47,7 @@
   let taskStatus = $state('pending');
   let taskProgressNotes = $state('');
 
-  const isPsychiatrist = $derived($session?.role_name === 'psychiatrist');
+  const isPsychiatrist = $derived(canPerform($session, 'psychiatrist'));
 
   onMount(async () => {
     const s = $session; if (!s) return;

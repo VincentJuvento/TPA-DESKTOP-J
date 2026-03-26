@@ -5,6 +5,7 @@
   import Field from '$lib/components/Field.svelte';
   import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
+  import { canPerform } from '$lib/stores/permissions';
   import { researchTaskApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
@@ -27,7 +28,7 @@
   let resultNotes = $state('');
 
   const isDirector = $derived(
-    $session?.role_name === 'the_observer' || $session?.role_name === 'the_artificer' || $session?.role_name === 'the_taskmaster'
+    canPerform($session, 'the_observer') || canPerform($session, 'the_artificer') || canPerform($session, 'the_taskmaster')
   );
 
   const taskCols = [

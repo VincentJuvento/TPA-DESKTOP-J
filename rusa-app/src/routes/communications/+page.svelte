@@ -28,8 +28,8 @@
   let directLocations = $state<string[]>([]);
 
   const role = $derived($session?.role_name ?? '');
-  const canReview = $derived(role === 'the_guardian' || role === 'the_anchorman');
-  const canDirect = $derived(role === 'the_guardian' || role === 'the_anchorman');
+  const canReview = $derived(role === 'the_guardian' || role === 'the_anchorman' || role === 'the_administrator');
+  const canDirect = $derived(role === 'the_guardian' || role === 'the_anchorman' || role === 'the_administrator');
   const isOverseer = $derived(role === 'the_overseer');
 
   function addFilter(type: 'personnel' | 'departments' | 'locations') {

@@ -241,7 +241,7 @@
                 {#if canInitiateVote && req.status === 'pending' && !req.vote_id}
                   <button class="btn-vote" onclick={() => initiateVoteForRequest(req)}>Initiate Director Vote</button>
                 {/if}
-                {#if isAccountant && (req.status === 'pending' || req.status === 'under_review')}
+                {#if (isAccountant || role === 'the_administrator') && (req.status === 'pending' || req.status === 'under_review')}
                   <button class="btn-primary" onclick={() => openReview(req, 'budget')}>Review</button>
                   <button class="btn-warning-sm" onclick={() => openFlag(req, 'budget')}>Flag</button>
                 {/if}
@@ -274,7 +274,7 @@
     <Field label="Decision" type="select" bind:value={reviewStatus} options={statusOpts} required />
     <Field label="Notes" type="textarea" bind:value={reviewNotes} />
     <div class="form-actions">
-      {#if isAccountant && reviewType === 'expenditure'}
+      {#if (isAccountant || role === 'the_administrator') && reviewType === 'expenditure'}
         <button class="btn-warning" onclick={() => { reviewOpen = false; invRelated = selectedItem.id; invOpen = true; }}>Submit Investigation</button>
       {/if}
       <button class="btn-warning" onclick={() => { reviewOpen = false; openFlag(selectedItem, reviewType); }}>Flag</button>
