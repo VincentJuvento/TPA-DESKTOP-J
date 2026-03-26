@@ -1,0 +1,91 @@
+This doc does not represent the truth, was a guide to make additions on my vpp, might miss/overadded something but good for now
+2. Penggabungan & Penghapusan (Merges & Removals)
+Hapus UC-100 (Request Access to Patient Appointment Schedule): Meminta izin kepada pasien terjadi di dunia nyata, bukan di sistem. Jadikan ini precondition saja di deskripsi Use Case.
+
+Gabungkan UC-173 & UC-174: "Ticket" dan "Invoice" terlalu berbau dokumen fisik. Gabungkan menjadi satu Use Case: Log Event Document to Archive.
+
+3. Penambahan Garis Asosiasi (Missing Actors)
+Aktor-aktor ini sebelumnya tidak terhubung ke Use Case tertentu di v7, padahal di transkrip mereka punya hak akses:
+
+Earth Security Head: Tambahkan garis ke UC-31 dan UC-32 (Lost & Found).
+
+Cleanup Crew: Tambahkan garis ke UC-116 dan UC-117 (Sanitary Inventory).
+
+Medical Staff: Tambahkan garis ke UC-106 dan UC-107 (Medical Inventory).
+
+Director {abstract}: Tambahkan garis ke UC-18 (Submit Data Request) agar semua level Director dan Administrator juga bisa request data.
+
+Earth & Galactic Security Head: Tambahkan garis ke Use Case untuk Submit Budget Request dan Submit Budget Expenditure Report (karena mereka juga kepala departemen).
+
+4. Penambahan Use Case BARU (New Additions for v8)
+Ini adalah kumpulan Use Case yang 100% baru, yang kita temukan murni dari ucapan narasumber di transkrip RUSA, yang belum ada sama sekali di v7:
+
+Subsystem 02 (Research & Lab Ops) & SS-03/SS-04
+
+Search Scientific Archive / Search Allowed Tests (Aktor: 5 Scientist)
+
+Submit New Test Proposal (Aktor: 5 Scientist)
+
+Review Test Proposal (Aktor: The Observer, The Artificer)
+
+Submit Help Request (Aktor: Scientist / Staff secara general)
+
+Subsystem 05 (Global Security)
+
+View Incident Report Archive (Aktor: Earth & Galactic Security Head + Staff)
+
+Send Security Broadcast Directly (Aktor: The Guardian)
+
+Review Space Station Findings Report (Aktor: Galactic Security Head & Staff)
+
+Subsystem 07 (Astronautics)
+
+Designate Sector Boundaries (Aktor: The Wanderer)
+
+Subsystem 08 (Settlement Ops)
+
+Log Settlement Inventory Item (Aktor: Civil Engineer, Farmer)
+
+View Settlement Inventory (Aktor: Civil Engineer, Farmer)
+
+Log Farm Health Check (Aktor: Farmer)
+
+Log Building Structural Inspection (Aktor: Civil Engineer)
+
+View All Settlers at Settlement / View Settlement Personnel Roster (Aktor: Settler Commander)
+
+View Pending Settler Requests (Aktor: Settler Commander)
+
+Review Settler Task Progress Report (Aktor: Settler Commander)
+
+Submit Settlement Anomaly Report (Aktor: Settler Commander)
+
+View Assigned Settlement Task (Aktor: Civil Engineer, Farmer - pengganti Receive Task)
+
+Subsystem 09 (Space Station Mgmt)
+
+Submit Station Abandonment Request (Aktor: Space Station Settler)
+
+Subsystem 10 (Clinical Psychiatry)
+
+View Patient Recovery Log (Aktor: Psychiatrist Assistant)
+
+Subsystem 12 & 13 (Sanitary & Waste)
+
+View Sanitary Inventory (Aktor: Cleanup, Disposal, Wastewater, Transport, Inspector Crew)
+
+Submit Division Transfer Request (Aktor: 5 Sanitary Crews yang sudah bekerja, bukan cuma new recruit)
+
+Review Division Transfer Request (Aktor: Head of Sanitary)
+
+View Assigned Sanitary Task (Aktor: 5 Sanitary Crews - pengganti Receive Task)
+
+View Disposal Handling Documentation (Aktor: Disposal Crew)
+
+View Wastewater Treatment Documentation (Aktor: Wastewater Crew)
+
+Review Inspection Findings Report (Aktor: Head of Sanitary)
+
+Subsystem 15 (Governance)
+
+View Task Progress of Subordinates (Aktor: The Artificer, The Observer)

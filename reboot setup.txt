@@ -1,0 +1,28 @@
+✅ Every time after restarting PC — REQUIRED steps
+1️⃣ Make sure PostgreSQL is running
+
+services.msc
+→ find postgresql-x64-18
+→ Right click → Start
+
+2️⃣ Make sure Redis is running (IMPORTANT — since you use WSL)
+Redis does NOT auto-start unless configured.
+Start it:
+
+wsl
+sudo service redis-server start
+
+Verify:
+
+redis-cli ping
+
+Expected:
+
+PONG
+
+3️⃣ Run your app
+
+Now run:
+
+cd C:\Users\kelly\LOCAL_REPO\TPA-DESKTOP\rusa-app
+npm run tauri dev

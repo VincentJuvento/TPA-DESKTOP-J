@@ -1,0 +1,18 @@
+# Rust
+target/
+**/target/
+
+# Debug files
+*.pdb
+
+# Build outputs
+dist/
+build/
+.svelte-kit/
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
