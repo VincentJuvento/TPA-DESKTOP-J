@@ -1,4 +1,4 @@
-use crate::auth::{permissions, require_role, require_role_name, validate_session_command};
+use crate::auth::{is_admin, permissions, require_role, require_role_name, validate_session_command};
 use crate::db;
 use crate::queries::auth::write_audit_log;
 use uuid::Uuid;
@@ -412,7 +412,7 @@ pub async fn submit_farm_report(
     health_check_notes: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
-    if session.role_name != "farmer" && session.role_name != "settler_commander" {
+    if session.role_name != "farmer" && session.role_name != "settler_commander" && !is_admin(&session) {
         return Err("Only farmers or commanders can submit farm reports".to_string());
     }
 
@@ -544,7 +544,7 @@ pub async fn submit_civil_engineer_report(
     plans_next_steps: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
-    if session.role_name != "civil_engineer" && session.role_name != "settler_commander" {
+    if session.role_name != "civil_engineer" && session.role_name != "settler_commander" && !is_admin(&session) {
         return Err("Only civil engineers or the settler commander can submit civil engineer reports".to_string());
     }
 

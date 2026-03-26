@@ -60,7 +60,7 @@
   const role = $derived($session?.role_name ?? '');
 
   function initTab() {
-    if (role === 'the_statistician') activeTab = 'pending';
+    if (role === 'the_statistician' || role === 'the_administrator') activeTab = 'pending';
     else if (role === 'data_analyst') activeTab = 'approved';
     else activeTab = 'mine';
   }
@@ -71,7 +71,7 @@
     loading = true;
     try {
       requests = await dataApi.getRequests(s.token);
-      if (role === 'the_statistician') {
+      if (role === 'the_statistician' || role === 'the_administrator') {
         allUsers = await userApi.getAll(s.token);
       } else if (role !== 'data_analyst') {
         requesterLocation = s.location ?? '';
@@ -459,7 +459,7 @@
 
 <PageShell title="Data Services" subtitle="Manage data requests and analysis pipeline">
 
-  {#if role === 'the_statistician'}
+  {#if role === 'the_statistician' || role === 'the_administrator'}
     <!-- ===== STATISTICIAN VIEW ===== -->
     <div class="tabs-bar">
       <button class="tab" class:active={activeTab==='pending'} onclick={() => activeTab='pending'}>Pending Review <span class="badge">{pending.length}</span></button>

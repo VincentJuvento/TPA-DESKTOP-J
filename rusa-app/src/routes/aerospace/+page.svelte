@@ -5,6 +5,7 @@
   import Field from '$lib/components/Field.svelte';
   import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
+  import { canPerform } from '$lib/stores/permissions';
   import { aerospaceApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
@@ -102,7 +103,7 @@
 
   const canAssignTasks = $derived(($session?.tier ?? 0) >= 2);
   const isDirector = $derived(($session?.tier ?? 0) >= 3);
-  const isEngineer = $derived($session?.role_name === 'aerospace_engineer');
+  const isEngineer = $derived(canPerform($session, 'aerospace_engineer'));
 
   onMount(async () => {
     const s = $session; if (!s) return;
@@ -380,7 +381,7 @@
   {:else if activeTab === 'work_orders'}
     <div class="section-bar">
       <h2 class="section-title">Work Orders</h2>
-      {#if $session?.role_name === 'aerospace_engineer'}
+      {#if isEngineer}
         <button class="btn-primary" onclick={() => woOpen = true}>+ New Work Order</button>
       {/if}
     </div>
@@ -403,7 +404,7 @@
               <td>{order.system_affected ?? '—'}</td>
               <td><span class={statusBadgeClass(order.status)}>{order.status ?? '—'}</span></td>
               <td>
-                {#if $session?.role_name === 'aerospace_engineer'}
+                {#if isEngineer}
                   <button class="btn-small" onclick={() => openStatusModal(order)}>Update Status</button>
                 {/if}
               </td>
@@ -463,7 +464,7 @@
   {:else if activeTab === 'technical_reports'}
     <div class="section-bar">
       <h2 class="section-title">Technical Reports</h2>
-      {#if $session?.role_name === 'aerospace_engineer'}
+      {#if isEngineer}
         <button class="btn-primary" onclick={() => reportOpen = true}>+ Submit Report</button>
       {/if}
     </div>

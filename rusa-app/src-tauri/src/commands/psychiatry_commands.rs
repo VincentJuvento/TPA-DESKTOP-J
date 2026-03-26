@@ -1,4 +1,4 @@
-use crate::auth::{permissions, require_role_name, validate_session_command};
+use crate::auth::{is_admin, permissions, require_role_name, validate_session_command};
 use crate::db;
 use crate::queries::auth::write_audit_log;
 use crate::queries::medical as medical_queries;
@@ -169,7 +169,7 @@ pub async fn register_patient(
 #[tauri::command]
 pub async fn get_patients(token: String) -> Result<Vec<serde_json::Value>, String> {
     let session = validate_session_command(&token).await?;
-    if session.role_name != "psychiatrist" && session.role_name != "psychiatrist_assistant" {
+    if session.role_name != "psychiatrist" && session.role_name != "psychiatrist_assistant" && !is_admin(&session) {
         return Err("Only psychiatrist or assistant can view patients".to_string());
     }
 
@@ -266,7 +266,7 @@ pub async fn get_recovery_log(
     patient_id: String,
 ) -> Result<Vec<serde_json::Value>, String> {
     let session = validate_session_command(&token).await?;
-    if session.role_name != "psychiatrist" && session.role_name != "psychiatrist_assistant" {
+    if session.role_name != "psychiatrist" && session.role_name != "psychiatrist_assistant" && !is_admin(&session) {
         return Err("Only psychiatrist or assistant can view recovery logs".to_string());
     }
 

@@ -5,6 +5,7 @@
   import Field from '$lib/components/Field.svelte';
   import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
+  import { canPerform } from '$lib/stores/permissions';
   import { settlementApi, governanceApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
@@ -68,8 +69,8 @@
   let ciProblems = $state('');
   let ciPlans = $state('');
 
-  const isCommander = $derived($session?.role_name === 'settler_commander');
-  const isCivilEngineer = $derived($session?.role_name === 'civil_engineer');
+  const isCommander = $derived(canPerform($session, 'settler_commander'));
+  const isCivilEngineer = $derived(canPerform($session, 'civil_engineer'));
 
   onMount(async () => {
     const s = $session; if (!s) return;
@@ -214,7 +215,7 @@
     {/if}
     <button class="tab" class:active={activeTab==='supply'} onclick={() => activeTab='supply'}>Supply Requests</button>
     <button class="tab" class:active={activeTab==='anomalies'} onclick={() => activeTab='anomalies'}>Anomaly Reports</button>
-    {#if $session?.role_name === 'farmer' || $session?.role_name === 'settler_commander'}
+    {#if canPerform($session, 'farmer') || canPerform($session, 'settler_commander')}
       <button class="tab" class:active={activeTab==='farm_reports'} onclick={() => activeTab='farm_reports'}>Farm Reports</button>
     {/if}
     <button class="tab" class:active={activeTab==='troublesome_reports'} onclick={() => activeTab='troublesome_reports'}>Troublesome Settlers</button>
@@ -278,7 +279,7 @@
   {:else if activeTab === 'farm_reports'}
     <div class="section-bar">
       <h2 class="section-title">Farm Reports</h2>
-      {#if $session?.role_name === 'farmer' || $session?.role_name === 'settler_commander'}
+      {#if canPerform($session, 'farmer') || canPerform($session, 'settler_commander')}
         <button class="btn-primary" onclick={() => farmOpen = true}>+ Submit Farm Report</button>
       {/if}
     </div>

@@ -1,4 +1,4 @@
-use crate::auth::{permissions, require_role_name, validate_session_command};
+use crate::auth::{is_admin, permissions, require_role_name, validate_session_command};
 use crate::queries::astronaut as astronaut_queries;
 use crate::queries::auth::write_audit_log;
 use uuid::Uuid;
@@ -58,7 +58,7 @@ pub async fn update_mission_status(
     status: String,
 ) -> Result<(), String> {
     let session = validate_session_command(&token).await?;
-    if session.role_name != "the_wanderer" && session.role_name != "the_taskmaster" {
+    if session.role_name != "the_wanderer" && session.role_name != "the_taskmaster" && !is_admin(&session) {
         return Err("Only wanderer or taskmaster can update mission status".to_string());
     }
 
@@ -250,7 +250,7 @@ pub async fn submit_conclusion_request(
     report_summary: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
-    if session.role_name != "astronaut" {
+    if session.role_name != "astronaut" && !is_admin(&session) {
         return Err("Only astronauts can submit conclusion requests".to_string());
     }
 
@@ -312,7 +312,7 @@ pub async fn review_conclusion_request(
     review_notes: Option<String>,
 ) -> Result<(), String> {
     let session = validate_session_command(&token).await?;
-    if session.role_name != "the_wanderer" && session.role_name != "the_taskmaster" {
+    if session.role_name != "the_wanderer" && session.role_name != "the_taskmaster" && !is_admin(&session) {
         return Err(
             "Only the_wanderer or the_taskmaster can review conclusion requests".to_string(),
         );

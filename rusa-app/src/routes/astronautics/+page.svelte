@@ -4,6 +4,7 @@
   import Table from '$lib/components/Table.svelte';
   import Field from '$lib/components/Field.svelte';
   import { session } from '$lib/stores/auth';
+  import { canPerform } from '$lib/stores/permissions';
   import { astronautApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
@@ -63,9 +64,9 @@
 
   let allUsers: any[] = $state([]);
 
-  const isWanderer = $derived($session?.role_name === 'the_wanderer');
+  const isWanderer = $derived(canPerform($session, 'the_wanderer'));
   const isDirector = $derived(
-    $session?.role_name === 'the_wanderer' || $session?.role_name === 'the_taskmaster'
+    canPerform($session, 'the_wanderer') || canPerform($session, 'the_taskmaster')
   );
 
   function getUserName(userId: string | undefined | null): string {
