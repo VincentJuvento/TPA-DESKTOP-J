@@ -14,13 +14,13 @@ ALTER TABLE help_requests
     ADD COLUMN IF NOT EXISTS assigned_proxy_director VARCHAR(100);
 
 -- Backfill ALL existing rows using the same routing logic as submit_help_request:
---   biological_engineer / agricultural_engineer / chemist → the_observer
---   all other roles (aerospace_engineer, etc.)           → the_artificer
+--   biologist / biological_engineer / agricultural_engineer / chemist → the_observer
+--   all other roles (aerospace_engineer, etc.)                        → the_artificer
 -- This preserves departmental boundaries established in PR #3 and ensures
 -- The Observer's dashboard is not polluted with aerospace requests and vice versa.
 UPDATE help_requests hr
 SET assigned_proxy_director = CASE
-    WHEN r.name IN ('biological_engineer', 'agricultural_engineer', 'chemist') THEN 'the_observer'
+    WHEN r.name IN ('biologist', 'biological_engineer', 'agricultural_engineer', 'chemist') THEN 'the_observer'
     ELSE 'the_artificer'
 END
 FROM users u
