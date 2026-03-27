@@ -1,4 +1,4 @@
-use crate::auth::{require_role, require_role_name, validate_session_command};
+use crate::auth::{is_admin, require_role, require_role_name, validate_session_command};
 use crate::db;
 use crate::queries::auth::write_audit_log;
 use crate::queries::aerospace as aerospace_queries;
@@ -863,6 +863,9 @@ pub async fn resolve_help_request(
 /// Director rejects a help request with a mandatory reason.
 /// Sets status to "rejected", records rejection_reason and rejected_at,
 /// and dispatches an inbox message to the original requester.
+/// The DB update and message dispatch are wrapped in a transaction: if
+/// the message fails to send, the status update is rolled back so the
+/// requester is never left without their notification ("return to desk").
 #[tauri::command]
 pub async fn reject_help_request(
     token: String,
@@ -878,16 +881,36 @@ pub async fn reject_help_request(
 
     let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
 
-    // Fetch requester and title before updating so we can notify them
-    let meta: Option<(Uuid, String)> = sqlx::query_as(
-        "SELECT requested_by, title FROM help_requests WHERE id = $1 AND deleted_at IS NULL",
+    // Fetch requester, title, and assigned proxy director so we can enforce domain
+    // restriction and send the notification.
+    let meta: Option<(Uuid, String, String)> = sqlx::query_as(
+        "SELECT requested_by, title, assigned_proxy_director \
+         FROM help_requests WHERE id = $1 AND deleted_at IS NULL",
     )
     .bind(rid)
     .fetch_optional(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let (requested_by, title) = meta.ok_or_else(|| "Help request not found".to_string())?;
+    let (requested_by, title, assigned_proxy_director) =
+        meta.ok_or_else(|| "Help request not found".to_string())?;
+
+    // Enforce domain restriction: only the Director assigned to this request
+    // (or the Administrator) may reject it.
+    if !is_admin(&session) && session.role_name != assigned_proxy_director {
+        return Err(format!(
+            "Access denied: this help request belongs to '{}'. Only that director or the Administrator may act on it.",
+            assigned_proxy_director
+        ));
+    }
+
+    // Open a transaction so the DB update and message dispatch are atomic.
+    // If the notification fails, we roll back so the requester is never left
+    // with a "rejected" record but no explanation in their inbox.
+    let mut tx = db::get_db()
+        .begin()
+        .await
+        .map_err(|e| format!("DB error starting transaction: {}", e))?;
 
     sqlx::query(
         "UPDATE help_requests SET status = 'rejected', rejection_reason = $1, rejected_at = NOW(), resolved_by = $2 \
@@ -896,7 +919,7 @@ pub async fn reject_help_request(
     .bind(&rejection_reason)
     .bind(session.user_id)
     .bind(rid)
-    .execute(db::get_db())
+    .execute(&mut *tx)
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
@@ -906,7 +929,7 @@ pub async fn reject_help_request(
         "Your help request \"{}\" has been reviewed and rejected.\n\nReason: {}",
         title, rejection_reason
     );
-    let _ = crate::queries::messages::send_message(
+    crate::queries::messages::send_message(
         session.user_id,
         &subject,
         &body,
@@ -915,7 +938,12 @@ pub async fn reject_help_request(
         &[],
         &[],
     )
-    .await;
+    .await
+    .map_err(|e| format!("Failed to deliver rejection notification: {}", e))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("DB error committing transaction: {}", e))?;
 
     let _ = write_audit_log(
         Some(session.user_id),
@@ -933,6 +961,8 @@ pub async fn reject_help_request(
 /// Director approves a help request by converting it to an assigned task.
 /// Creates the appropriate task record (aerospace or research) and links it
 /// to the help request via created_task_id. Sets status to "converted".
+/// Only the Director whose domain matches the request's assigned_proxy_director
+/// (or the Administrator) may approve it.
 #[tauri::command]
 pub async fn approve_help_request(
     token: String,
@@ -956,6 +986,15 @@ pub async fn approve_help_request(
 
     let (title, description, proxy_director) =
         row.ok_or_else(|| "Help request not found".to_string())?;
+
+    // Enforce domain restriction: only the Director assigned to this request
+    // (or the Administrator) may approve it.
+    if !is_admin(&session) && session.role_name != proxy_director {
+        return Err(format!(
+            "Access denied: this help request belongs to '{}'. Only that director or the Administrator may act on it.",
+            proxy_director
+        ));
+    }
 
     // Create the linked task in the appropriate table based on the proxy director
     let task_id: Uuid = if proxy_director == "the_artificer" {
@@ -1016,6 +1055,9 @@ pub async fn approve_help_request(
 /// Director delivers the completed task result back to the original requester.
 /// Called after the linked task has been completed; sets help request status to "resolved"
 /// and dispatches an inbox message to the original requester with the response.
+/// The DB update and message dispatch are wrapped in a transaction: if the message
+/// fails to send, the status update is rolled back so the requester is never left
+/// without their response ("return to desk" guarantee).
 #[tauri::command]
 pub async fn proxy_deliver_task_response(
     token: String,
@@ -1031,16 +1073,36 @@ pub async fn proxy_deliver_task_response(
 
     let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
 
-    // Fetch requester and title before updating so we can notify them
-    let meta: Option<(Uuid, String)> = sqlx::query_as(
-        "SELECT requested_by, title FROM help_requests WHERE id = $1 AND deleted_at IS NULL",
+    // Fetch requester, title, and assigned proxy director so we can enforce domain
+    // restriction and send the notification.
+    let meta: Option<(Uuid, String, String)> = sqlx::query_as(
+        "SELECT requested_by, title, assigned_proxy_director \
+         FROM help_requests WHERE id = $1 AND deleted_at IS NULL",
     )
     .bind(rid)
     .fetch_optional(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let (requested_by, title) = meta.ok_or_else(|| "Help request not found".to_string())?;
+    let (requested_by, title, assigned_proxy_director) =
+        meta.ok_or_else(|| "Help request not found".to_string())?;
+
+    // Enforce domain restriction: only the Director assigned to this request
+    // (or the Administrator) may deliver its response.
+    if !is_admin(&session) && session.role_name != assigned_proxy_director {
+        return Err(format!(
+            "Access denied: this help request belongs to '{}'. Only that director or the Administrator may act on it.",
+            assigned_proxy_director
+        ));
+    }
+
+    // Open a transaction so the DB update and message dispatch are atomic.
+    // If the notification fails, we roll back so the requester is never left
+    // with a "resolved" record but no response in their inbox.
+    let mut tx = db::get_db()
+        .begin()
+        .await
+        .map_err(|e| format!("DB error starting transaction: {}", e))?;
 
     sqlx::query(
         "UPDATE help_requests SET status = 'resolved', response = $1, resolved_by = $2 \
@@ -1049,7 +1111,7 @@ pub async fn proxy_deliver_task_response(
     .bind(&response)
     .bind(session.user_id)
     .bind(rid)
-    .execute(db::get_db())
+    .execute(&mut *tx)
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
@@ -1059,7 +1121,7 @@ pub async fn proxy_deliver_task_response(
         "Your help request \"{}\" has been completed and the results have been delivered by your proxy director.\n\nResponse: {}",
         title, response
     );
-    let _ = crate::queries::messages::send_message(
+    crate::queries::messages::send_message(
         session.user_id,
         &subject,
         &body,
@@ -1068,7 +1130,12 @@ pub async fn proxy_deliver_task_response(
         &[],
         &[],
     )
-    .await;
+    .await
+    .map_err(|e| format!("Failed to deliver task response notification: {}", e))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("DB error committing transaction: {}", e))?;
 
     let _ = write_audit_log(
         Some(session.user_id),
