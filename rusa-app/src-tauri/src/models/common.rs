@@ -37,3 +37,27 @@ pub struct PaginatedResponse<T> {
     pub page: i64,
     pub per_page: i64,
 }
+
+#[derive(Debug, Serialize)]
+pub struct AppError {
+    pub message: String,
+}
+
+impl From<sqlx::Error> for AppError {
+    fn from(err: sqlx::Error) -> Self {
+        eprintln!("Database Error: {}", err);
+        AppError { message: "A database error occurred while processing your request.".to_string() }
+    }
+}
+
+impl From<String> for AppError {
+    fn from(message: String) -> Self {
+        AppError { message }
+    }
+}
+
+impl From<&str> for AppError {
+    fn from(message: &str) -> Self {
+        AppError { message: message.to_string() }
+    }
+}
