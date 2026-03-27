@@ -1,4 +1,4 @@
-use crate::auth::{require_role, require_role_name, validate_session_command};
+use crate::auth::{is_admin, require_role, require_role_name, validate_session_command};
 use crate::db;
 use crate::queries::auth::write_audit_log;
 use crate::queries::aerospace as aerospace_queries;
@@ -57,6 +57,9 @@ struct HelpRequestRow {
     response: Option<String>,
     resolved_by: Option<Uuid>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
+    rejection_reason: Option<String>,
+    rejected_at: Option<chrono::DateTime<chrono::Utc>>,
+    created_task_id: Option<Uuid>,
 }
 
 async fn ensure_aerospace_tasks_table() -> Result<(), String> {
@@ -791,7 +794,7 @@ pub async fn get_help_requests(token: String) -> Result<Vec<serde_json::Value>, 
         // Directors see requests routed to them
         let proxy_role = session.role_name.as_str();
         sqlx::query_as::<_, HelpRequestRow>(
-            "SELECT id, requested_by, title, description, category, assigned_proxy_director, status, response, resolved_by, created_at \
+            "SELECT id, requested_by, title, description, category, assigned_proxy_director, status, response, resolved_by, created_at, rejection_reason, rejected_at, created_task_id \
              FROM help_requests WHERE assigned_proxy_director = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
         )
         .bind(proxy_role)
@@ -800,7 +803,7 @@ pub async fn get_help_requests(token: String) -> Result<Vec<serde_json::Value>, 
     } else {
         // Engineers see their own requests
         sqlx::query_as::<_, HelpRequestRow>(
-            "SELECT id, requested_by, title, description, category, assigned_proxy_director, status, response, resolved_by, created_at \
+            "SELECT id, requested_by, title, description, category, assigned_proxy_director, status, response, resolved_by, created_at, rejection_reason, rejected_at, created_task_id \
              FROM help_requests WHERE requested_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
         )
         .bind(session.user_id)
@@ -812,7 +815,9 @@ pub async fn get_help_requests(token: String) -> Result<Vec<serde_json::Value>, 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
 
-/// Director resolves or updates a help request (e.g., marks it converted to a task).
+/// Director marks a help request as in_review or closed (generic status update).
+/// Use approve_help_request to convert to a task, reject_help_request to reject,
+/// and proxy_deliver_task_response to deliver the completed task result.
 #[tauri::command]
 pub async fn resolve_help_request(
     token: String,
@@ -823,9 +828,9 @@ pub async fn resolve_help_request(
     let session = validate_session_command(&token).await?;
     require_role(&session, 3)?;
 
-    let valid_statuses = ["in_review", "converted", "resolved", "closed"];
+    let valid_statuses = ["in_review", "closed"];
     if !valid_statuses.contains(&status.as_str()) {
-        return Err(format!("Invalid status '{}'. Must be one of: in_review, converted, resolved, closed", status));
+        return Err(format!("Invalid status '{}'. Must be one of: in_review, closed", status));
     }
 
     let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
@@ -849,6 +854,296 @@ pub async fn resolve_help_request(
         Some(rid),
         None,
         Some(serde_json::json!({ "status": status })),
+    )
+    .await;
+
+    Ok(())
+}
+
+/// Director rejects a help request with a mandatory reason.
+/// Sets status to "rejected", records rejection_reason and rejected_at,
+/// and dispatches an inbox message to the original requester.
+/// The DB update and message dispatch are wrapped in a transaction: if
+/// the message fails to send, the status update is rolled back so the
+/// requester is never left without their notification ("return to desk").
+#[tauri::command]
+pub async fn reject_help_request(
+    token: String,
+    request_id: String,
+    rejection_reason: String,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    require_role(&session, 3)?;
+
+    if rejection_reason.trim().is_empty() {
+        return Err("Rejection reason is required".to_string());
+    }
+
+    let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
+
+    // Fetch requester, title, and assigned proxy director so we can enforce domain
+    // restriction and send the notification.
+    let meta: Option<(Uuid, String, String)> = sqlx::query_as(
+        "SELECT requested_by, title, assigned_proxy_director \
+         FROM help_requests WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(rid)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let (requested_by, title, assigned_proxy_director) =
+        meta.ok_or_else(|| "Help request not found".to_string())?;
+
+    // Enforce domain restriction: only the Director assigned to this request
+    // (or the Administrator) may reject it.
+    if !is_admin(&session) && session.role_name != assigned_proxy_director {
+        return Err(format!(
+            "Access denied: this help request belongs to '{}'. Only that director or the Administrator may act on it.",
+            assigned_proxy_director
+        ));
+    }
+
+    // Open a transaction so the DB update and message dispatch are atomic.
+    // If the notification fails, we roll back so the requester is never left
+    // with a "rejected" record but no explanation in their inbox.
+    let mut tx = db::get_db()
+        .begin()
+        .await
+        .map_err(|e| format!("DB error starting transaction: {}", e))?;
+
+    sqlx::query(
+        "UPDATE help_requests SET status = 'rejected', rejection_reason = $1, rejected_at = NOW(), resolved_by = $2 \
+         WHERE id = $3 AND deleted_at IS NULL AND status IN ('open', 'in_review')",
+    )
+    .bind(&rejection_reason)
+    .bind(session.user_id)
+    .bind(rid)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    // Dispatch inbox notification to the original requester
+    let subject = format!("Help Request Rejected: {}", title);
+    let body = format!(
+        "Your help request \"{}\" has been reviewed and rejected.\n\nReason: {}",
+        title, rejection_reason
+    );
+    crate::queries::messages::send_message(
+        session.user_id,
+        &subject,
+        &body,
+        None,
+        &[requested_by],
+        &[],
+        &[],
+    )
+    .await
+    .map_err(|e| format!("Failed to deliver rejection notification: {}", e))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("DB error committing transaction: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "REJECT_HELP_REQUEST",
+        Some("help_requests"),
+        Some(rid),
+        None,
+        Some(serde_json::json!({ "rejection_reason": rejection_reason })),
+    )
+    .await;
+
+    Ok(())
+}
+
+/// Director approves a help request by converting it to an assigned task.
+/// Creates the appropriate task record (aerospace or research) and links it
+/// to the help request via created_task_id. Sets status to "converted".
+/// Only the Director whose domain matches the request's assigned_proxy_director
+/// (or the Administrator) may approve it.
+#[tauri::command]
+pub async fn approve_help_request(
+    token: String,
+    request_id: String,
+    assigned_to_id: String,
+) -> Result<String, String> {
+    let session = validate_session_command(&token).await?;
+    require_role(&session, 3)?;
+
+    let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
+    let atid = Uuid::parse_str(&assigned_to_id).map_err(|_| "Invalid assignee ID".to_string())?;
+
+    // Fetch the help request to get title, description, and proxy director
+    let row: Option<(String, Option<String>, String)> = sqlx::query_as(
+        "SELECT title, description, assigned_proxy_director FROM help_requests WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(rid)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let (title, description, proxy_director) =
+        row.ok_or_else(|| "Help request not found".to_string())?;
+
+    // Enforce domain restriction: only the Director assigned to this request
+    // (or the Administrator) may approve it.
+    if !is_admin(&session) && session.role_name != proxy_director {
+        return Err(format!(
+            "Access denied: this help request belongs to '{}'. Only that director or the Administrator may act on it.",
+            proxy_director
+        ));
+    }
+
+    // Create the linked task in the appropriate table based on the proxy director
+    let task_id: Uuid = if proxy_director == "the_artificer" {
+        ensure_aerospace_tasks_table().await?;
+        let r: (Uuid,) = sqlx::query_as(
+            "INSERT INTO aerospace_assigned_tasks (title, description, assigned_to, assigned_by, status) \
+             VALUES ($1, $2, $3, $4, 'pending') RETURNING id",
+        )
+        .bind(&title)
+        .bind(&description)
+        .bind(atid)
+        .bind(session.user_id)
+        .fetch_one(db::get_db())
+        .await
+        .map_err(|e| format!("DB error creating aerospace task: {}", e))?;
+        r.0
+    } else {
+        // the_observer → research_tasks
+        let r: (Uuid,) = sqlx::query_as(
+            "INSERT INTO research_tasks (title, description, assigned_to, assigned_by, status) \
+             VALUES ($1, $2, $3, $4, 'pending') RETURNING id",
+        )
+        .bind(&title)
+        .bind(&description)
+        .bind(atid)
+        .bind(session.user_id)
+        .fetch_one(db::get_db())
+        .await
+        .map_err(|e| format!("DB error creating research task: {}", e))?;
+        r.0
+    };
+
+    // Update the help request: mark as converted and store the new task's ID
+    sqlx::query(
+        "UPDATE help_requests SET status = 'converted', created_task_id = $1, resolved_by = $2 \
+         WHERE id = $3 AND deleted_at IS NULL AND status IN ('open', 'in_review')",
+    )
+    .bind(task_id)
+    .bind(session.user_id)
+    .bind(rid)
+    .execute(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "APPROVE_HELP_REQUEST",
+        Some("help_requests"),
+        Some(rid),
+        None,
+        Some(serde_json::json!({ "created_task_id": task_id.to_string(), "assigned_to": assigned_to_id })),
+    )
+    .await;
+
+    Ok(task_id.to_string())
+}
+
+/// Director delivers the completed task result back to the original requester.
+/// Called after the linked task has been completed; sets help request status to "resolved"
+/// and dispatches an inbox message to the original requester with the response.
+/// The DB update and message dispatch are wrapped in a transaction: if the message
+/// fails to send, the status update is rolled back so the requester is never left
+/// without their response ("return to desk" guarantee).
+#[tauri::command]
+pub async fn proxy_deliver_task_response(
+    token: String,
+    request_id: String,
+    response: String,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    require_role(&session, 3)?;
+
+    if response.trim().is_empty() {
+        return Err("Response is required".to_string());
+    }
+
+    let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
+
+    // Fetch requester, title, and assigned proxy director so we can enforce domain
+    // restriction and send the notification.
+    let meta: Option<(Uuid, String, String)> = sqlx::query_as(
+        "SELECT requested_by, title, assigned_proxy_director \
+         FROM help_requests WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(rid)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let (requested_by, title, assigned_proxy_director) =
+        meta.ok_or_else(|| "Help request not found".to_string())?;
+
+    // Enforce domain restriction: only the Director assigned to this request
+    // (or the Administrator) may deliver its response.
+    if !is_admin(&session) && session.role_name != assigned_proxy_director {
+        return Err(format!(
+            "Access denied: this help request belongs to '{}'. Only that director or the Administrator may act on it.",
+            assigned_proxy_director
+        ));
+    }
+
+    // Open a transaction so the DB update and message dispatch are atomic.
+    // If the notification fails, we roll back so the requester is never left
+    // with a "resolved" record but no response in their inbox.
+    let mut tx = db::get_db()
+        .begin()
+        .await
+        .map_err(|e| format!("DB error starting transaction: {}", e))?;
+
+    sqlx::query(
+        "UPDATE help_requests SET status = 'resolved', response = $1, resolved_by = $2 \
+         WHERE id = $3 AND deleted_at IS NULL AND status = 'converted'",
+    )
+    .bind(&response)
+    .bind(session.user_id)
+    .bind(rid)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    // Dispatch inbox notification to the original requester
+    let subject = format!("Help Request Fulfilled: {}", title);
+    let body = format!(
+        "Your help request \"{}\" has been completed and the results have been delivered by your proxy director.\n\nResponse: {}",
+        title, response
+    );
+    crate::queries::messages::send_message(
+        session.user_id,
+        &subject,
+        &body,
+        None,
+        &[requested_by],
+        &[],
+        &[],
+    )
+    .await
+    .map_err(|e| format!("Failed to deliver task response notification: {}", e))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("DB error committing transaction: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "PROXY_DELIVER_TASK_RESPONSE",
+        Some("help_requests"),
+        Some(rid),
+        None,
+        Some(serde_json::json!({ "response": response })),
     )
     .await;
 

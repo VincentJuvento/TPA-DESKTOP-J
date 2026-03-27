@@ -220,6 +220,9 @@ pub fn run() {
             commands::aerospace_commands::submit_help_request,
             commands::aerospace_commands::get_help_requests,
             commands::aerospace_commands::resolve_help_request,
+            commands::aerospace_commands::reject_help_request,
+            commands::aerospace_commands::approve_help_request,
+            commands::aerospace_commands::proxy_deliver_task_response,
             // station
             commands::station_commands::get_stations,
             commands::station_commands::get_station_inventory,
