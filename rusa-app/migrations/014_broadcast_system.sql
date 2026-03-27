@@ -7,7 +7,7 @@ ALTER TABLE broadcast_requests
   
 UPDATE broadcast_requests br
 SET routed_to = CASE
-  WHEN r.role_name IN ('head_of_earth_security', 'head_of_galactic_security') THEN 'the_guardian'
+  WHEN r.name IN ('head_of_earth_security', 'head_of_galactic_security') THEN 'the_guardian'
   ELSE 'the_anchorman'
 END
 FROM users u
