@@ -1,17 +1,26 @@
+import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 
+const projectRoot = path.resolve(import.meta.dirname);
+const tauriTargetDir = process.env.TAURI_TARGET_DIR
+  ? path.resolve(process.env.TAURI_TARGET_DIR)
+  : path.join(projectRoot, 'src-tauri', 'target', 'debug');
+const tauriExecutableName = process.platform === 'win32' ? 'rusa-app.exe' : 'rusa-app';
+const tauriExecutablePath = process.env.PLAYWRIGHT_TAURI_EXECUTABLE_PATH
+  ? path.resolve(process.env.PLAYWRIGHT_TAURI_EXECUTABLE_PATH)
+  : path.join(tauriTargetDir, tauriExecutableName);
+
 /**
- * Playwright E2E configuration for RUSA IMS.
- *
- * The application is served by the Tauri/Vite dev server on port 1420.
+ * Playwright E2E configuration for RUSA IMS Tauri desktop integration.
  * To run the tests:
- *   1. Start the dev server:  npm run dev   (or npm run tauri dev for the full desktop app)
+ *   1. Build desktop binary:  cargo build --manifest-path src-tauri/Cargo.toml
  *   2. Run the suite:         npm run test:e2e
  *
  * @see https://playwright.dev/docs/test-configuration
  */
 export default defineConfig({
   testDir: './tests',
+  globalSetup: './tests/tauri.global-setup.ts',
 
   /* Retry once on CI to reduce flakiness from network timing */
   retries: process.env.CI ? 1 : 0,
@@ -22,8 +31,13 @@ export default defineConfig({
   reporter: 'html',
 
   use: {
-    /* Base URL for the Tauri/Vite dev server */
-    baseURL: 'http://localhost:1420',
+    /*
+     * Tauri desktop executable under test.
+     * Can be overridden with PLAYWRIGHT_TAURI_EXECUTABLE_PATH.
+     */
+    launchOptions: {
+      executablePath: tauriExecutablePath,
+    },
 
     /* Capture a trace on the first retry so failures are diagnosable */
     trace: 'on-first-retry',
@@ -34,7 +48,7 @@ export default defineConfig({
 
   projects: [
     {
-      name: 'chromium',
+      name: 'tauri-desktop',
       use: { ...devices['Desktop Chrome'] },
     },
   ],
