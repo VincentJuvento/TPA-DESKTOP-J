@@ -46,6 +46,21 @@
   let helpResolveStatus = $state('in_review');
   let helpResolveResponse = $state('');
 
+  // Help request reject modal (director)
+  let helpRejectOpen = $state(false);
+  let helpRejectTarget: any = $state(null);
+  let helpRejectReason = $state('');
+
+  // Help request approve modal (director — convert to task)
+  let helpApproveOpen = $state(false);
+  let helpApproveTarget: any = $state(null);
+  let helpApproveAssignee: any = $state(null);
+
+  // Help request deliver response modal (director — proxy deliver)
+  let helpDeliverOpen = $state(false);
+  let helpDeliverTarget: any = $state(null);
+  let helpDeliverResponse = $state('');
+
   // Test form
   let testOpen = $state(false);
   let testTitle = $state('');
@@ -481,6 +496,57 @@
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
+  function openHelpReject(req: any) {
+    helpRejectTarget = req;
+    helpRejectReason = '';
+    helpRejectOpen = true;
+  }
+
+  async function submitHelpReject() {
+    const s = $session; if (!s || !helpRejectTarget) return;
+    if (!helpRejectReason.trim()) { showToast('Rejection reason is required', 'error'); return; }
+    try {
+      await aerospaceApi.rejectHelpRequest(s.token, helpRejectTarget.id, helpRejectReason);
+      showToast('Help request rejected', 'success');
+      helpRejectOpen = false;
+      helpRequests = await aerospaceApi.getHelpRequests(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  function openHelpApprove(req: any) {
+    helpApproveTarget = req;
+    helpApproveAssignee = null;
+    helpApproveOpen = true;
+  }
+
+  async function submitHelpApprove() {
+    const s = $session; if (!s || !helpApproveTarget) return;
+    if (!helpApproveAssignee) { showToast('Select a subordinate to assign the task to', 'error'); return; }
+    try {
+      await aerospaceApi.approveHelpRequest(s.token, helpApproveTarget.id, helpApproveAssignee.id);
+      showToast('Help request approved — task created', 'success');
+      helpApproveOpen = false;
+      helpRequests = await aerospaceApi.getHelpRequests(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  function openHelpDeliver(req: any) {
+    helpDeliverTarget = req;
+    helpDeliverResponse = '';
+    helpDeliverOpen = true;
+  }
+
+  async function submitHelpDeliver() {
+    const s = $session; if (!s || !helpDeliverTarget) return;
+    if (!helpDeliverResponse.trim()) { showToast('Response is required', 'error'); return; }
+    try {
+      await aerospaceApi.proxyDeliverTaskResponse(s.token, helpDeliverTarget.id, helpDeliverResponse);
+      showToast('Response delivered to original requester', 'success');
+      helpDeliverOpen = false;
+      helpRequests = await aerospaceApi.getHelpRequests(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
   function statusBadgeClass(status: string | null | undefined): string {
     switch (status) {
       case 'pending': return 'badge badge-open';
@@ -527,8 +593,6 @@
   ];
   const helpResolveOpts = [
     { value: 'in_review', label: 'In Review' },
-    { value: 'converted', label: 'Converted to Task' },
-    { value: 'resolved', label: 'Resolved' },
     { value: 'closed', label: 'Closed' },
   ];
   const speciesCategoryOpts = [
@@ -869,7 +933,7 @@
               <th>Category</th>
               <th>Routed To</th>
               <th>Status</th>
-              <th>Response</th>
+              <th>Response / Rejection Reason</th>
               <th>Date</th>
               {#if isDirector}<th>Actions</th>{/if}
             </tr>
@@ -880,14 +944,26 @@
                 <td>{req.title}</td>
                 <td>{req.category ?? '—'}</td>
                 <td><span class="proxy-badge">{req.assigned_proxy_director}</span></td>
-                <td><span class="badge {req.status === 'resolved' || req.status === 'closed' ? 'badge-done' : req.status === 'converted' ? 'badge-progress' : 'badge-open'}">{req.status ?? '—'}</span></td>
-                <td class="notes-preview">{req.response ?? '—'}</td>
+                <td><span class="badge {req.status === 'resolved' || req.status === 'closed' ? 'badge-done' : req.status === 'rejected' ? 'badge-rejected' : req.status === 'converted' ? 'badge-progress' : 'badge-open'}">{req.status ?? '—'}</span></td>
+                <td class="notes-preview">
+                  {#if req.status === 'rejected' && req.rejection_reason}
+                    <span class="badge badge-rejected" style="font-size:0.7rem">Rejected:</span> {req.rejection_reason}
+                  {:else}
+                    {req.response ?? '—'}
+                  {/if}
+                </td>
                 <td>{req.created_at ? new Date(req.created_at).toLocaleDateString() : '—'}</td>
                 {#if isDirector}
                   <td>
-                    {#if req.status === 'open' || req.status === 'in_review'}
-                      <button class="btn-small btn-observer" onclick={() => openHelpResolve(req)}>Update</button>
-                    {/if}
+                    <div class="actions-cell">
+                      {#if req.status === 'open' || req.status === 'in_review'}
+                        <button class="btn-small btn-add" onclick={() => openHelpApprove(req)}>Approve</button>
+                        <button class="btn-small btn-danger-sm" onclick={() => openHelpReject(req)}>Reject</button>
+                        <button class="btn-small btn-observer" onclick={() => openHelpResolve(req)}>Mark Review</button>
+                      {:else if req.status === 'converted'}
+                        <button class="btn-small btn-observer" onclick={() => openHelpDeliver(req)}>Deliver Response</button>
+                      {/if}
+                    </div>
                   </td>
                 {/if}
               </tr>
@@ -1195,7 +1271,7 @@
   </div>
 </Modal>
 
-<Modal bind:open={helpResolveOpen} title="Update Help Request">
+<Modal bind:open={helpResolveOpen} title="Mark Help Request — In Review / Close">
   <div class="form">
     {#if helpResolveTarget}
       <p class="info-text">Request: <strong>{helpResolveTarget.title}</strong></p>
@@ -1204,10 +1280,64 @@
       {/if}
     {/if}
     <Field label="Status" type="select" bind:value={helpResolveStatus} options={helpResolveOpts} />
-    <Field label="Response / Notes" type="textarea" bind:value={helpResolveResponse} rows={3} />
+    <Field label="Notes (optional)" type="textarea" bind:value={helpResolveResponse} rows={3} />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => helpResolveOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={submitHelpResolve}>Update</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={helpRejectOpen} title="Reject Help Request">
+  <div class="form">
+    {#if helpRejectTarget}
+      <p class="info-text">Request: <strong>{helpRejectTarget.title}</strong></p>
+      {#if helpRejectTarget.description}
+        <p class="info-text">{helpRejectTarget.description}</p>
+      {/if}
+    {/if}
+    <p class="access-note">⚠️ The rejection reason will be immediately visible to the original requester. This action cannot be undone.</p>
+    <Field label="Rejection Reason" type="textarea" bind:value={helpRejectReason} rows={4} required />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => helpRejectOpen = false}>Cancel</button>
+      <button class="btn-danger" onclick={submitHelpReject} disabled={!helpRejectReason.trim()}>Reject Request</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={helpApproveOpen} title="Approve Help Request — Assign Task">
+  <div class="form">
+    {#if helpApproveTarget}
+      <p class="info-text">Request: <strong>{helpApproveTarget.title}</strong></p>
+      {#if helpApproveTarget.description}
+        <p class="info-text">{helpApproveTarget.description}</p>
+      {/if}
+    {/if}
+    <p class="access-note" style="background:rgba(0,200,83,0.06);border-color:rgba(0,200,83,0.2);color:#00c853">✅ Approving will create an assigned research task for the selected subordinate and mark this request as <strong>converted</strong>.</p>
+    <div class="field">
+      <label class="field-label">Assign Task To</label>
+      <UserAutocompleteSingle users={allUsers} bind:selected={helpApproveAssignee} />
+    </div>
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => helpApproveOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitHelpApprove} disabled={!helpApproveAssignee}>Approve & Create Task</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={helpDeliverOpen} title="Deliver Task Response">
+  <div class="form">
+    {#if helpDeliverTarget}
+      <p class="info-text">Request: <strong>{helpDeliverTarget.title}</strong></p>
+      {#if helpDeliverTarget.created_task_id}
+        <p class="info-text">Linked Task ID: <code>{helpDeliverTarget.created_task_id}</code></p>
+      {/if}
+    {/if}
+    <p class="access-note">📤 As proxy director, you are officially delivering the completed task result back to the original requester. The request will be marked <strong>resolved</strong>.</p>
+    <Field label="Response / Delivery Notes" type="textarea" bind:value={helpDeliverResponse} rows={4} required />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => helpDeliverOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitHelpDeliver} disabled={!helpDeliverResponse.trim()}>Deliver Response</button>
     </div>
   </div>
 </Modal>
@@ -1248,6 +1378,8 @@
   .btn-conclude:hover { border-color: #a78bfa; color: #c4b5fd; }
   .btn-danger { background: linear-gradient(135deg, #dc2626, #ef4444); border: none; border-radius: 4px; color: #fff; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
   .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-danger-sm { border-color: #ff4466; color: #ff4466; }
+  .btn-danger-sm:hover { background: rgba(255,68,102,0.12); }
   .actions-cell { white-space: nowrap; display: flex; gap: 0.375rem; align-items: center; flex-wrap: wrap; }
   .notes-preview { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8fa3cc; font-size: 0.8rem; }
   .tab-badge { background: #7c3aed; border-radius: 10px; color: #fff; font-size: 0.6rem; font-weight: 700; margin-left: 4px; padding: 1px 6px; }

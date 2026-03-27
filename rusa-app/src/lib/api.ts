@@ -419,6 +419,12 @@ export const aerospaceApi = {
   getHelpRequests: (token: string) => invoke<any[]>('get_help_requests', { token }),
   resolveHelpRequest: (token: string, requestId: string, status: string, response?: string) =>
     invoke<void>('resolve_help_request', { token, requestId, status, response }),
+  rejectHelpRequest: (token: string, requestId: string, rejectionReason: string) =>
+    invoke<void>('reject_help_request', { token, requestId, rejectionReason }),
+  approveHelpRequest: (token: string, requestId: string, assignedToId: string) =>
+    invoke<string>('approve_help_request', { token, requestId, assignedToId }),
+  proxyDeliverTaskResponse: (token: string, requestId: string, response: string) =>
+    invoke<void>('proxy_deliver_task_response', { token, requestId, response }),
 };
 
 // Admin
