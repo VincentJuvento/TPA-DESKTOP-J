@@ -32,6 +32,12 @@ export default defineConfig({
 
   use: {
     /*
+     * Tauri WebView content origin.
+     * The app URL is not http://localhost in desktop mode.
+     */
+    baseURL: 'tauri://localhost',
+
+    /*
      * Tauri desktop executable under test.
      * Can be overridden with PLAYWRIGHT_TAURI_EXECUTABLE_PATH.
      */
