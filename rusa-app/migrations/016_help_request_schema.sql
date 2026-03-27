@@ -3,9 +3,9 @@
 
 -- ─── Add rejection and task-link fields ─────────────────────────────────────
 ALTER TABLE help_requests
-    ADD COLUMN IF NOT EXISTS rejection_reason TEXT,
-    ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMPTZ,
-    ADD COLUMN IF NOT EXISTS created_task_id UUID;
+    ADD COLUMN IF NOT EXISTS rejection_reason TEXT,        -- reason provided by the director when rejecting
+    ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMPTZ,      -- timestamp when the request was rejected
+    ADD COLUMN IF NOT EXISTS created_task_id UUID;         -- UUID of the task created when request is approved
 
 -- ─── Update status constraint to include 'rejected' ─────────────────────────
 ALTER TABLE help_requests DROP CONSTRAINT IF EXISTS help_requests_status_check;

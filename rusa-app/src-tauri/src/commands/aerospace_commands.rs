@@ -861,7 +861,8 @@ pub async fn resolve_help_request(
 }
 
 /// Director rejects a help request with a mandatory reason.
-/// Sets status to "rejected", records rejection_reason and rejected_at.
+/// Sets status to "rejected", records rejection_reason and rejected_at,
+/// and dispatches an inbox message to the original requester.
 #[tauri::command]
 pub async fn reject_help_request(
     token: String,
@@ -877,6 +878,17 @@ pub async fn reject_help_request(
 
     let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
 
+    // Fetch requester and title before updating so we can notify them
+    let meta: Option<(Uuid, String)> = sqlx::query_as(
+        "SELECT requested_by, title FROM help_requests WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(rid)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let (requested_by, title) = meta.ok_or_else(|| "Help request not found".to_string())?;
+
     sqlx::query(
         "UPDATE help_requests SET status = 'rejected', rejection_reason = $1, rejected_at = NOW(), resolved_by = $2 \
          WHERE id = $3 AND deleted_at IS NULL AND status IN ('open', 'in_review')",
@@ -887,6 +899,23 @@ pub async fn reject_help_request(
     .execute(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
+
+    // Dispatch inbox notification to the original requester
+    let subject = format!("Help Request Rejected: {}", title);
+    let body = format!(
+        "Your help request \"{}\" has been reviewed and rejected.\n\nReason: {}",
+        title, rejection_reason
+    );
+    let _ = crate::queries::messages::send_message(
+        session.user_id,
+        &subject,
+        &body,
+        None,
+        &[requested_by],
+        &[],
+        &[],
+    )
+    .await;
 
     let _ = write_audit_log(
         Some(session.user_id),
@@ -985,7 +1014,8 @@ pub async fn approve_help_request(
 }
 
 /// Director delivers the completed task result back to the original requester.
-/// Called after the linked task has been completed; sets help request status to "resolved".
+/// Called after the linked task has been completed; sets help request status to "resolved"
+/// and dispatches an inbox message to the original requester with the response.
 #[tauri::command]
 pub async fn proxy_deliver_task_response(
     token: String,
@@ -1001,6 +1031,17 @@ pub async fn proxy_deliver_task_response(
 
     let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
 
+    // Fetch requester and title before updating so we can notify them
+    let meta: Option<(Uuid, String)> = sqlx::query_as(
+        "SELECT requested_by, title FROM help_requests WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(rid)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let (requested_by, title) = meta.ok_or_else(|| "Help request not found".to_string())?;
+
     sqlx::query(
         "UPDATE help_requests SET status = 'resolved', response = $1, resolved_by = $2 \
          WHERE id = $3 AND deleted_at IS NULL AND status = 'converted'",
@@ -1011,6 +1052,23 @@ pub async fn proxy_deliver_task_response(
     .execute(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
+
+    // Dispatch inbox notification to the original requester
+    let subject = format!("Help Request Fulfilled: {}", title);
+    let body = format!(
+        "Your help request \"{}\" has been completed and the results have been delivered by your proxy director.\n\nResponse: {}",
+        title, response
+    );
+    let _ = crate::queries::messages::send_message(
+        session.user_id,
+        &subject,
+        &body,
+        None,
+        &[requested_by],
+        &[],
+        &[],
+    )
+    .await;
 
     let _ = write_audit_log(
         Some(session.user_id),
