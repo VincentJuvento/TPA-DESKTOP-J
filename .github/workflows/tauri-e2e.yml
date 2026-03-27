@@ -34,7 +34,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: /home/runner/work/TPA-DESKTOP-J/TPA-DESKTOP-J/rusa-app
+        working-directory: rusa-app
 
     steps:
       - name: Checkout
@@ -49,6 +49,7 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
+            postgresql-client \
             patchelf \
             xvfb
 
@@ -67,6 +68,33 @@ jobs:
 
       - name: Install SQLx CLI
         run: cargo install sqlx-cli --no-default-features --features rustls,postgres
+
+      - name: Bootstrap legacy aerospace task table for migration compatibility
+        run: |
+          psql "$DATABASE_URL" <<'SQL'
+          CREATE TABLE IF NOT EXISTS aerospace_assigned_tasks (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            title TEXT NOT NULL,
+            description TEXT,
+            assigned_to UUID REFERENCES users(id),
+            assigned_by UUID REFERENCES users(id),
+            status TEXT NOT NULL DEFAULT 'pending',
+            progress_notes TEXT,
+            due_date TIMESTAMPTZ,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            deleted_at TIMESTAMPTZ,
+            conclusion_requested_at TIMESTAMPTZ,
+            conclusion_requested_by UUID REFERENCES users(id),
+            conclusion_approved_at TIMESTAMPTZ,
+            conclusion_approved_by UUID REFERENCES users(id),
+            final_notes TEXT,
+            final_findings TEXT,
+            methodology_summary TEXT,
+            key_results TEXT,
+            recommendations TEXT,
+            limitations TEXT
+          );
+          SQL
 
       - name: Run SQL migrations
         run: sqlx migrate run --source migrations
