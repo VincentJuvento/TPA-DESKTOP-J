@@ -753,7 +753,7 @@ pub async fn submit_help_request(
 
     let assigned_proxy_director = match session.role_name.as_str() {
         "aerospace_engineer" => "the_artificer",
-        "biological_engineer" | "agricultural_engineer" => "the_observer",
+        "biological_engineer" | "agricultural_engineer" | "chemist" => "the_observer",
         _ => "the_artificer",
     };
 

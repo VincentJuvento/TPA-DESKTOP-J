@@ -66,6 +66,16 @@ export const researchApi = {
     invoke<any[]>('get_experiment_tasks', { token, experimentId }),
 };
 
+// Chemistry Department
+export const chemistryApi = {
+  getMatterArchive: (token: string) => invoke<any[]>('get_matter_archive', { token }),
+  addChemistryLog: (token: string, experimentId: string, logDate: string, linkedTestId: string, matterTested?: string, personnelPresent?: string, notes?: string) =>
+    invoke<string>('add_chemistry_log', { token, experimentId, logDate, linkedTestId, matterTested, personnelPresent, notes }),
+  approveChemistryConclusion: (token: string, experimentId: string, decision: string, matterName: string, matterClassification?: string, matterType?: string, matterProperties?: string, reviewNotes?: string) =>
+    invoke<void>('approve_chemistry_conclusion', { token, experimentId, decision, matterName, matterClassification, matterType, matterProperties, reviewNotes }),
+  getChemistryObserverDashboard: (token: string) => invoke<any>('get_chemistry_observer_dashboard', { token }),
+};
+
 // Data Services
 export const dataApi = {
   submitRequest: (token: string, payload: {

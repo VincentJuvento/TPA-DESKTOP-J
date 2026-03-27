@@ -316,6 +316,11 @@ pub fn run() {
             commands::admin_commands::terminate_personnel,
             commands::admin_commands::get_audit_log,
             commands::admin_commands::override_vote,
+            // chemistry
+            commands::chemistry_commands::get_matter_archive,
+            commands::chemistry_commands::add_chemistry_log,
+            commands::chemistry_commands::approve_chemistry_conclusion,
+            commands::chemistry_commands::get_chemistry_observer_dashboard,
             // research tasks
             commands::research_task_commands::assign_research_task,
             commands::research_task_commands::get_research_tasks,
