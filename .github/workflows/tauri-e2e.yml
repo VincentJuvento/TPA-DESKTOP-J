@@ -13,6 +13,8 @@ on:
 jobs:
   tauri-e2e:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     services:
       postgres:
         image: postgres:18
@@ -58,7 +60,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: /home/runner/work/TPA-DESKTOP-J/TPA-DESKTOP-J/rusa-app/package-lock.json
+          cache-dependency-path: rusa-app/package-lock.json
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -69,9 +71,12 @@ jobs:
       - name: Install SQLx CLI
         run: cargo install sqlx-cli --no-default-features --features rustls,postgres
 
+      - name: Run core SQL migrations (up to v12)
+        run: sqlx migrate run --source migrations --target-version 12
+
       - name: Bootstrap legacy aerospace task table for migration compatibility
         run: |
-          psql "$DATABASE_URL" <<'SQL'
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
           CREATE TABLE IF NOT EXISTS aerospace_assigned_tasks (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             title TEXT NOT NULL,
@@ -96,7 +101,7 @@ jobs:
           );
           SQL
 
-      - name: Run SQL migrations
+      - name: Run remaining SQL migrations
         run: sqlx migrate run --source migrations
 
       - name: Run Tauri E2E tests
