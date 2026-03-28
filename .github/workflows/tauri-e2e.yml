@@ -45,29 +45,26 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
+          WEBKIT_40_PKG=""
           if apt-cache show libwebkit2gtk-4.0-dev >/dev/null 2>&1; then
-            sudo apt-get install -y \
-              libglib2.0-dev \
-              libgtk-3-dev \
-              libwebkit2gtk-4.0-dev \
-              libwebkit2gtk-4.1-dev \
-              libappindicator3-dev \
-              librsvg2-dev \
-              postgresql-client \
-              patchelf \
-              xvfb
-          else
-            sudo apt-get install -y \
-              libglib2.0-dev \
-              libgtk-3-dev \
-              libwebkit2gtk-4.1-dev \
-              libappindicator3-dev \
-              libayatana-appindicator3-dev \
-              librsvg2-dev \
-              postgresql-client \
-              patchelf \
-              xvfb
+            WEBKIT_40_PKG="libwebkit2gtk-4.0-dev"
           fi
+
+          INDICATOR_PKG="libayatana-appindicator3-dev"
+          if apt-cache show libappindicator3-dev >/dev/null 2>&1; then
+            INDICATOR_PKG="libappindicator3-dev"
+          fi
+
+          sudo apt-get install -y \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            $WEBKIT_40_PKG \
+            libwebkit2gtk-4.1-dev \
+            $INDICATOR_PKG \
+            librsvg2-dev \
+            postgresql-client \
+            patchelf \
+            xvfb
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
