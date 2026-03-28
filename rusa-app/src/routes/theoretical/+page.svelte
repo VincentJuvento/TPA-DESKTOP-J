@@ -31,6 +31,9 @@
     canPerform($session, 'the_observer') || canPerform($session, 'the_artificer') || canPerform($session, 'the_taskmaster')
   );
 
+  const myTheoreticalTasks = $derived(tasks.filter((t: any) => t.assigned_to === $session?.user_id));
+  const assignedByMeTheoreticalTasks = $derived(tasks.filter((t: any) => t.assigned_by === $session?.user_id && t.assigned_to !== $session?.user_id));
+
   const taskCols = [
     { key: 'title', label: 'Title' },
     { key: 'status', label: 'Status' },
@@ -94,13 +97,23 @@
     ...t,
     source_message_id: displaySourceId(t.source_message_id),
   })));
+
+  const displayMyTheoreticalTasks = $derived(myTheoreticalTasks.map(t => ({
+    ...t,
+    source_message_id: displaySourceId(t.source_message_id),
+  })));
+
+  const displayAssignedByMeTheoreticalTasks = $derived(assignedByMeTheoreticalTasks.map(t => ({
+    ...t,
+    source_message_id: displaySourceId(t.source_message_id),
+  })));
 </script>
 
 <svelte:head><title>RUSA IMS — Theoretical Sciences</title></svelte:head>
 
 <PageShell title="Theoretical Sciences" subtitle="Research task assignment and result tracking">
   <div class="section-bar">
-    <h2 class="section-title">Research Tasks</h2>
+    <h2 class="section-title">My Research Tasks</h2>
     {#if isDirector}
       <button class="btn-primary" onclick={() => assignOpen = true}>+ Assign Task</button>
     {/if}
@@ -109,15 +122,37 @@
   {#if loading}
     <p class="loading">Loading...</p>
   {:else}
-    <Table columns={taskCols} rows={displayTasks}>
-      {#snippet rowActions(row)}
-        {#if isDirector && row.status === 'result_submitted'}
-          <button class="btn-action" onclick={() => markComplete(row.id)}>Mark Complete</button>
-        {:else if !isDirector && (row.status === 'pending' || row.status === 'in_progress') && row.assigned_to === $session?.user_id}
-          <button class="btn-action" onclick={() => openSubmitResult(row.id)}>Submit Result</button>
-        {/if}
-      {/snippet}
-    </Table>
+    {#if displayMyTheoreticalTasks.length === 0}
+      <p class="loading">No research tasks have been assigned to you.</p>
+    {:else}
+      <Table columns={taskCols} rows={displayMyTheoreticalTasks}>
+        {#snippet rowActions(row)}
+          {#if (row.status === 'pending' || row.status === 'in_progress') && row.assigned_to === $session?.user_id}
+            <button class="btn-action" onclick={() => openSubmitResult(row.id)}>Submit Result</button>
+          {/if}
+          {#if isDirector && row.status === 'result_submitted'}
+            <button class="btn-action" onclick={() => markComplete(row.id)}>Mark Complete</button>
+          {/if}
+        {/snippet}
+      </Table>
+    {/if}
+
+    {#if isDirector}
+      <div class="section-bar" style="margin-top: 2rem;">
+        <h2 class="section-title">Tasks I Assigned</h2>
+      </div>
+      {#if displayAssignedByMeTheoreticalTasks.length === 0}
+        <p class="loading">No research tasks assigned yet.</p>
+      {:else}
+        <Table columns={taskCols} rows={displayAssignedByMeTheoreticalTasks}>
+          {#snippet rowActions(row)}
+            {#if row.status === 'result_submitted'}
+              <button class="btn-action" onclick={() => markComplete(row.id)}>Mark Complete</button>
+            {/if}
+          {/snippet}
+        </Table>
+      {/if}
+    {/if}
   {/if}
 </PageShell>
 

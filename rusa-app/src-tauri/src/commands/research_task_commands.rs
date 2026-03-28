@@ -1,4 +1,4 @@
-use crate::auth::{is_admin, permissions, validate_session_command};
+use crate::auth::{is_admin, validate_session_command};
 use crate::db;
 use crate::queries::auth::write_audit_log;
 use uuid::Uuid;
@@ -98,26 +98,13 @@ pub async fn get_research_tasks(token: String) -> Result<Vec<serde_json::Value>,
 
     ensure_research_tasks_table().await?;
 
-    let rows = if permissions::has_permission(&session.role_name, "the_observer")
-        || permissions::has_permission(&session.role_name, "the_artificer")
-        || permissions::has_permission(&session.role_name, "the_taskmaster")
-    {
-        sqlx::query_as::<_, ResearchTaskRow>(
-            "SELECT id, title, description, assigned_to, assigned_by, source_message_id, status, result_notes, due_date, created_at FROM research_tasks WHERE assigned_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
-        )
-        .bind(session.user_id)
-        .fetch_all(db::get_db())
-        .await
-        .map_err(|e| format!("DB error: {}", e))?
-    } else {
-        sqlx::query_as::<_, ResearchTaskRow>(
-            "SELECT id, title, description, assigned_to, assigned_by, source_message_id, status, result_notes, due_date, created_at FROM research_tasks WHERE assigned_to = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
-        )
-        .bind(session.user_id)
-        .fetch_all(db::get_db())
-        .await
-        .map_err(|e| format!("DB error: {}", e))?
-    };
+    let rows = sqlx::query_as::<_, ResearchTaskRow>(
+        "SELECT id, title, description, assigned_to, assigned_by, source_message_id, status, result_notes, due_date, created_at FROM research_tasks WHERE (assigned_by = $1 OR assigned_to = $1) AND deleted_at IS NULL ORDER BY created_at DESC"
+    )
+    .bind(session.user_id)
+    .fetch_all(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows
         .into_iter()
