@@ -8,6 +8,7 @@
   import { canPerform } from '$lib/stores/permissions';
   import { researchApi, researchTaskApi, userApi, aerospaceApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
+  import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
 
   type Tab = 'experiments' | 'species' | 'tests' | 'research_tasks' | 'pending_conclusions' | 'observer_dashboard' | 'help_requests';
@@ -88,51 +89,7 @@
   let selectedTask: any = $state(null);
   let resultNotes = $state('');
 
-  // Conclusion request modal (for scientists/engineers)
-  let conclusionReqOpen = $state(false);
-  let conclusionReqExp: any = $state(null);
-  let conclusionFinalNotes = $state('');
-  let conclusionFinalFindings = $state('');
-  let conclusionMethodology = $state('');
-  let conclusionKeyResults = $state('');
-  let conclusionRecommendations = $state('');
-  let conclusionLimitations = $state('');
-
-  // Conclusion review modal (for Taskmaster)
-  let conclusionReviewOpen = $state(false);
-  let conclusionReviewTarget: any = $state(null);
-  let conclusionReviewLogs: any[] = $state([]);
-  let conclusionDecision = $state('');
-  let conclusionReviewNotes = $state('');
-  let conclusionReviewLoading = $state(false);
-
-  // Add Log modal
-  let logOpen = $state(false);
-  let logExp: any = $state(null);
-  let logDate = $state('');
-  let logPersonnel = $state('');
-  let logSpecies = $state('');
-  let logTestsText = $state('');
-  let logLinkedTestIds: string[] = $state([]);
-  let logNotes = $state('');
-  let logNewSpecies = $state(false);
-  let logNewSpeciesName = $state('');
-  let logNewSpeciesClass = $state('');
-  let logNewSpeciesHabitat = $state('');
-  let logNewSpeciesDesc = $state('');
-
-  // View Logs modal
-  let viewLogsOpen = $state(false);
-  let viewLogsExp: any = $state(null);
-  let viewLogsData: any[] = $state([]);
-  let viewLogsLoading = $state(false);
-
-  // Observer: Assign Experiment Task modal
-  let assignExpTaskOpen = $state(false);
-  let assignExpTaskExp: any = $state(null);
-  let assignExpTaskAssignee: any = $state(null);
-  let assignExpTaskTitle = $state('');
-  let assignExpTaskDue = $state('');
+  // Conclusion request and review modals moved to /experiments/[id] detail page
 
   // Observer dashboard data
   let observerDashboard: any = $state(null);
@@ -160,19 +117,19 @@
 
   const pendingConclusions = $derived(experiments.filter((e: any) => e.status === 'conclusion_requested'));
 
+  // Status filter for experiments master list
+  let expStatusFilter = $state<string>('all');
+  const filteredExperiments = $derived(
+    expStatusFilter === 'all'
+      ? experiments
+      : experiments.filter((e: any) => e.status === expStatusFilter)
+  );
+
   function getUserName(userId: string | undefined | null): string {
     if (!userId) return '—';
     const u = allUsers.find((u: any) => u.id === userId);
     return u ? (u.full_name ?? u.username ?? userId) : userId;
   }
-
-  const isAuthorizedForConclusion = $derived(
-    conclusionReviewTarget
-      ? conclusionReviewTarget.reviewed_by === $session?.user_id
-      : false
-  );
-
-  const approvedTests = $derived(tests.filter((t: any) => t.status === 'approved'));
 
   onMount(async () => {
     const s = $session;
@@ -281,179 +238,6 @@
       await researchTaskApi.complete(s.token, task.id);
       showToast('Task marked complete', 'success');
       researchTasks = await researchTaskApi.getTasks(s.token);
-    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
-  }
-
-  function openConclusionRequest(exp: any) {
-    conclusionReqExp = exp;
-    conclusionFinalNotes = exp.final_notes ?? '';
-    conclusionFinalFindings = exp.final_findings ?? '';
-    conclusionMethodology = exp.methodology_summary ?? '';
-    conclusionKeyResults = exp.key_results ?? '';
-    conclusionRecommendations = exp.recommendations ?? '';
-    conclusionLimitations = exp.limitations ?? '';
-    conclusionReqOpen = true;
-  }
-
-  async function submitConclusionRequest() {
-    const s = $session; if (!s || !conclusionReqExp) return;
-    if (!conclusionFinalNotes.trim()) { showToast('Final summary is required', 'error'); return; }
-    if (!conclusionMethodology.trim()) { showToast('Methodology summary is required', 'error'); return; }
-    if (!conclusionKeyResults.trim()) { showToast('Key results are required', 'error'); return; }
-    try {
-      await researchApi.requestConclusion(
-        s.token,
-        conclusionReqExp.id,
-        conclusionFinalNotes,
-        conclusionFinalFindings || undefined,
-        conclusionMethodology || undefined,
-        conclusionKeyResults || undefined,
-        conclusionRecommendations || undefined,
-        conclusionLimitations || undefined,
-      );
-      showToast('Conclusion request submitted', 'success');
-      conclusionReqOpen = false;
-      experiments = await researchApi.getExperiments(s.token);
-    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
-  }
-
-  async function openConclusionReview(exp: any) {
-    const s = $session; if (!s) return;
-    conclusionReviewTarget = exp;
-    conclusionDecision = '';
-    conclusionReviewNotes = '';
-    conclusionReviewLoading = true;
-    conclusionReviewOpen = true;
-    try {
-      conclusionReviewLogs = await researchApi.getExperimentLogs(s.token, exp.id);
-    } catch (_e: any) {
-      conclusionReviewLogs = [];
-    }
-    conclusionReviewLoading = false;
-  }
-
-  async function submitConclusionReview() {
-    const s = $session; if (!s || !conclusionReviewTarget) return;
-    if (!conclusionDecision) { showToast('Decision required', 'error'); return; }
-    try {
-      await researchApi.approveConclusion(s.token, conclusionReviewTarget.id, conclusionDecision, conclusionReviewNotes || undefined);
-      showToast(conclusionDecision === 'approve' ? 'Conclusion approved' : 'Conclusion rejected', 'success');
-      conclusionReviewOpen = false;
-      experiments = await researchApi.getExperiments(s.token);
-    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
-  }
-
-  function openAddLog(exp: any) {
-    logExp = exp;
-    logDate = new Date().toISOString().slice(0, 16);
-    logPersonnel = '';
-    logSpecies = '';
-    logTestsText = '';
-    logLinkedTestIds = [];
-    logNotes = '';
-    logNewSpecies = false;
-    logNewSpeciesName = '';
-    logNewSpeciesClass = '';
-    logNewSpeciesHabitat = '';
-    logNewSpeciesDesc = '';
-    logOpen = true;
-  }
-
-  function toggleTestLink(testId: string) {
-    if (logLinkedTestIds.includes(testId)) {
-      logLinkedTestIds = logLinkedTestIds.filter(id => id !== testId);
-    } else {
-      logLinkedTestIds = [...logLinkedTestIds, testId];
-    }
-  }
-
-  async function submitLog() {
-    const s = $session; if (!s || !logExp) return;
-    if (!logDate) { showToast('Log date is required', 'error'); return; }
-    try {
-      const dateVal = logDate.includes('T') ? new Date(logDate).toISOString() : new Date(logDate + 'T00:00:00Z').toISOString();
-      const linkedJson = logLinkedTestIds.length > 0 ? JSON.stringify(logLinkedTestIds) : undefined;
-      const logId = await researchApi.addLog(
-        s.token, logExp.id, dateVal,
-        logPersonnel || undefined,
-        logSpecies || undefined,
-        logTestsText || undefined,
-        linkedJson,
-        logNotes || undefined,
-      );
-
-      // If new species discovered, create proposal
-      if (logNewSpecies && logNewSpeciesName.trim()) {
-        try {
-          await researchApi.proposeSpeciesFromDiscovery(
-            s.token, logExp.id, logNewSpeciesName,
-            logNewSpeciesDesc || undefined,
-            logNewSpeciesClass || undefined,
-            logNewSpeciesHabitat || undefined,
-          );
-          showToast('New species discovery proposed for archive', 'success');
-          species = await researchApi.getSpeciesArchive(s.token);
-        } catch (se: any) {
-          showToast('Log saved but species proposal failed: ' + se, 'error');
-        }
-      }
-
-      showToast('Log entry added', 'success');
-      logOpen = false;
-      experiments = await researchApi.getExperiments(s.token);
-    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
-  }
-
-  async function openViewLogs(exp: any) {
-    const s = $session; if (!s) return;
-    viewLogsExp = exp;
-    viewLogsData = [];
-    viewLogsLoading = true;
-    viewLogsOpen = true;
-    try {
-      viewLogsData = await researchApi.getExperimentLogs(s.token, exp.id);
-    } catch (_e: any) {
-      viewLogsData = [];
-    }
-    viewLogsLoading = false;
-  }
-
-  function getLinkedTestNames(linkedTestIds: string | null): string {
-    if (!linkedTestIds) return '';
-    try {
-      const ids: string[] = JSON.parse(linkedTestIds);
-      if (!Array.isArray(ids)) return linkedTestIds;
-      return ids.map(id => {
-        const t = tests.find((t: any) => t.id === id);
-        return t ? t.title : id.slice(0, 8) + '…';
-      }).join(', ');
-    } catch {
-      return linkedTestIds;
-    }
-  }
-
-  function openAssignExpTask(exp: any) {
-    assignExpTaskExp = exp;
-    assignExpTaskAssignee = null;
-    assignExpTaskTitle = '';
-    assignExpTaskDue = '';
-    assignExpTaskOpen = true;
-  }
-
-  async function submitAssignExpTask() {
-    const s = $session; if (!s || !assignExpTaskExp) return;
-    if (!assignExpTaskAssignee || !assignExpTaskTitle.trim()) { showToast('Assignee and title required', 'error'); return; }
-    try {
-      await researchApi.assignExperimentTask(
-        s.token,
-        assignExpTaskExp.id,
-        assignExpTaskAssignee.id,
-        assignExpTaskTitle,
-        assignExpTaskDue ? new Date(assignExpTaskDue).toISOString() : undefined,
-      );
-      showToast('Task assigned', 'success');
-      assignExpTaskOpen = false;
-      if (observerDashboard) await loadObserverDashboard();
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
@@ -642,54 +426,33 @@
       <h2 class="section-title">Experiments</h2>
       <button class="btn-primary" onclick={() => expOpen = true}>+ Propose Experiment</button>
     </div>
-    {#if experiments.length === 0}
-      <p class="empty">No experiments yet.</p>
+    <!-- Status filter -->
+    <div class="filter-bar">
+      {#each [['all','All'], ['pending','Pending'], ['approved','Approved'], ['in_progress','In Progress'], ['conclusion_requested','Conclusion Requested'], ['completed','Completed'], ['rejected','Rejected']] as [val, label]}
+        <button class="filter-btn" class:active={expStatusFilter === val} onclick={() => expStatusFilter = val}>{label}</button>
+      {/each}
+    </div>
+    {#if filteredExperiments.length === 0}
+      <p class="empty">{experiments.length === 0 ? 'No experiments yet.' : 'No experiments match the selected filter.'}</p>
     {:else}
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Title</th>
-              <th>Type</th>
-              <th>Status</th>
-              <th>Start Date</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each experiments as exp}
-              <tr>
-                <td>{exp.title}</td>
-                <td>{exp.experiment_type ?? '—'}</td>
-                <td>
-                  <span class="badge {expStatusBadgeClass(exp.status)}">{exp.status ?? '—'}</span>
-                  {#if exp.conclusion_approved}
-                    <span class="badge badge-done" style="margin-left:4px">Concluded</span>
-                  {/if}
-                </td>
-                <td>{exp.start_date ? new Date(exp.start_date).toLocaleDateString() : '—'}</td>
-                <td class="actions-cell">
-                  <button class="btn-small" onclick={() => openViewLogs(exp)}>View Logs</button>
-                  {#if exp.status === 'in_progress' || exp.status === 'approved'}
-                    <button class="btn-small btn-add" onclick={() => openAddLog(exp)}>+ Log</button>
-                  {/if}
-                  {#if canReviewExperiment}
-                    <button class="btn-small" onclick={() => openReview(exp, 'experiment')}>Review</button>
-                  {/if}
-                  {#if isObserver}
-                    <button class="btn-small btn-observer" onclick={() => openAssignExpTask(exp)}>Assign Task</button>
-                  {/if}
-                  {#if exp.status === 'in_progress' && exp.proposed_by === $session?.user_id}
-                    <button class="btn-small btn-conclude" onclick={() => openConclusionRequest(exp)}>Request Conclusion</button>
-                  {/if}
-                  {#if isTaskmaster && exp.status === 'conclusion_requested'}
-                    <button class="btn-small btn-conclude" onclick={() => openConclusionReview(exp)}>Review Conclusion</button>
-                  {/if}
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
+      <div class="exp-card-list">
+        {#each filteredExperiments as exp}
+          <button class="exp-card" onclick={() => goto(`/experiments/${exp.id}`)}>
+            <div class="exp-card-header">
+              <span class="exp-card-title">{exp.title}</span>
+              <div class="exp-card-badges">
+                <span class="badge {expStatusBadgeClass(exp.status)}">{exp.status ?? '—'}</span>
+                {#if exp.conclusion_approved}
+                  <span class="badge badge-done">Concluded</span>
+                {/if}
+              </div>
+            </div>
+            <div class="exp-card-meta">
+              {#if exp.experiment_type}<span class="meta-chip">🔬 {exp.experiment_type}</span>{/if}
+              {#if exp.start_date}<span class="meta-chip">📅 {new Date(exp.start_date).toLocaleDateString()}</span>{/if}
+            </div>
+          </button>
+        {/each}
       </div>
     {/if}
   {:else if activeTab === 'species'}
@@ -808,33 +571,23 @@
     {#if pendingConclusions.length === 0}
       <p class="empty">No experiment conclusions pending approval.</p>
     {:else}
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Experiment Title</th>
-              <th>Type</th>
-              <th>Requested At</th>
-              <th>Original Approver</th>
-              <th>Final Notes (Preview)</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each pendingConclusions as exp}
-              <tr>
-                <td>{exp.title}</td>
-                <td>{exp.experiment_type ?? '—'}</td>
-                <td>{exp.conclusion_requested_at ? new Date(exp.conclusion_requested_at).toLocaleString() : '—'}</td>
-                <td>{getUserName(exp.reviewed_by)}</td>
-                <td class="notes-preview">{exp.final_notes ? exp.final_notes.slice(0, 80) + (exp.final_notes.length > 80 ? '…' : '') : '—'}</td>
-                <td>
-                  <button class="btn-small btn-conclude" onclick={() => openConclusionReview(exp)}>Review</button>
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
+      <div class="exp-card-list">
+        {#each pendingConclusions as exp}
+          <button class="exp-card" onclick={() => goto(`/experiments/${exp.id}`)}>
+            <div class="exp-card-header">
+              <span class="exp-card-title">{exp.title}</span>
+              <span class="badge badge-conclude">Conclusion Requested</span>
+            </div>
+            <div class="exp-card-meta">
+              {#if exp.experiment_type}<span class="meta-chip">🔬 {exp.experiment_type}</span>{/if}
+              {#if exp.conclusion_requested_at}<span class="meta-chip">📅 Requested: {new Date(exp.conclusion_requested_at).toLocaleDateString()}</span>{/if}
+              <span class="meta-chip">Approver: {getUserName(exp.reviewed_by)}</span>
+            </div>
+            {#if exp.final_notes}
+              <p class="exp-card-preview">{exp.final_notes.slice(0, 100)}{exp.final_notes.length > 100 ? '…' : ''}</p>
+            {/if}
+          </button>
+        {/each}
       </div>
     {/if}
   {:else if activeTab === 'observer_dashboard'}
@@ -869,7 +622,7 @@
                     <td><span class="badge {expStatusBadgeClass(exp.status)}">{exp.status ?? '—'}</span></td>
                     <td>{exp.days_elapsed ?? 0} days</td>
                     <td>
-                      <button class="btn-small btn-observer" onclick={() => openAssignExpTask(exp)}>+ Assign Task</button>
+                      <button class="btn-small btn-observer" onclick={() => goto(`/experiments/${exp.id}`)}>Open Workspace</button>
                     </td>
                   </tr>
                 {/each}
@@ -1066,211 +819,6 @@
   </div>
 </Modal>
 
-<Modal bind:open={conclusionReqOpen} title="Request Experiment Conclusion">
-  <div class="form">
-    <div class="info-block">
-      <p class="info-text">Experiment: <strong>{conclusionReqExp?.title}</strong></p>
-      <p class="info-text">Started: <strong>{conclusionReqExp?.start_date ? new Date(conclusionReqExp.start_date).toLocaleDateString() : '—'}</strong></p>
-    </div>
-    <Field label="Executive Summary" type="textarea" bind:value={conclusionFinalNotes} rows={4} required hint="High-level summary of the experiment outcome." />
-    <Field label="Methodology Summary" type="textarea" bind:value={conclusionMethodology} rows={3} required hint="How the experiment was conducted." />
-    <Field label="Key Results / Findings" type="textarea" bind:value={conclusionKeyResults} rows={3} required hint="Main findings and results observed." />
-    <Field label="Final Findings (Detail)" type="textarea" bind:value={conclusionFinalFindings} rows={3} hint="Detailed findings and statistical results (if applicable)." />
-    <Field label="Recommendations" type="textarea" bind:value={conclusionRecommendations} rows={3} hint="Suggested next steps or actions." />
-    <Field label="Limitations" type="textarea" bind:value={conclusionLimitations} rows={3} hint="Known limitations or caveats of the experiment." />
-    <div class="form-actions">
-      <button class="btn-secondary" onclick={() => conclusionReqOpen = false}>Cancel</button>
-      <button class="btn-primary" onclick={submitConclusionRequest}>Request Conclusion</button>
-    </div>
-  </div>
-</Modal>
-
-<Modal bind:open={conclusionReviewOpen} title="Review Experiment Conclusion">
-  <div class="form">
-    {#if conclusionReviewTarget}
-      <div class="info-block">
-        <p class="info-text">Experiment: <strong>{conclusionReviewTarget.title}</strong></p>
-        <p class="info-text">Type: <strong>{conclusionReviewTarget.experiment_type ?? '—'}</strong></p>
-        <p class="info-text">Requested: <strong>{conclusionReviewTarget.conclusion_requested_at ? new Date(conclusionReviewTarget.conclusion_requested_at).toLocaleString() : '—'}</strong></p>
-        <p class="info-text">Original Approver: <strong>{getUserName(conclusionReviewTarget.reviewed_by)}</strong></p>
-        {#if isAuthorizedForConclusion}
-          <p class="auth-badge auth-ok">✓ You are authorized to approve this conclusion</p>
-        {:else}
-          <p class="auth-badge auth-denied">✗ Not authorized — only the original proposal approver can approve this conclusion</p>
-        {/if}
-      </div>
-      <div class="field">
-        <span class="field-label">Executive Summary</span>
-        <div class="readonly-block">{conclusionReviewTarget.final_notes ?? '—'}</div>
-      </div>
-      {#if conclusionReviewTarget.methodology_summary}
-        <div class="field">
-          <span class="field-label">Methodology</span>
-          <div class="readonly-block">{conclusionReviewTarget.methodology_summary}</div>
-        </div>
-      {/if}
-      {#if conclusionReviewTarget.key_results}
-        <div class="field">
-          <span class="field-label">Key Results</span>
-          <div class="readonly-block">{conclusionReviewTarget.key_results}</div>
-        </div>
-      {/if}
-      {#if conclusionReviewTarget.final_findings}
-        <div class="field">
-          <span class="field-label">Final Findings</span>
-          <div class="readonly-block">{conclusionReviewTarget.final_findings}</div>
-        </div>
-      {/if}
-      {#if conclusionReviewTarget.recommendations}
-        <div class="field">
-          <span class="field-label">Recommendations</span>
-          <div class="readonly-block">{conclusionReviewTarget.recommendations}</div>
-        </div>
-      {/if}
-      {#if conclusionReviewTarget.limitations}
-        <div class="field">
-          <span class="field-label">Limitations</span>
-          <div class="readonly-block">{conclusionReviewTarget.limitations}</div>
-        </div>
-      {/if}
-      <div class="field">
-        <span class="field-label">Experiment Logs ({conclusionReviewLoading ? '…' : conclusionReviewLogs.length})</span>
-        {#if conclusionReviewLoading}
-          <p class="info-text">Loading logs…</p>
-        {:else if conclusionReviewLogs.length === 0}
-          <p class="info-text">No logs found.</p>
-        {:else}
-          <div class="logs-scroll">
-            {#each conclusionReviewLogs as log}
-              <div class="log-entry">
-                <span class="log-date">{log.log_date ?? '—'}</span>
-                {#if log.linked_test_ids}
-                  <p class="log-field"><strong>Tests Performed:</strong> {getLinkedTestNames(log.linked_test_ids)}</p>
-                {:else if log.tests_performed}
-                  <p class="log-field"><strong>Tests:</strong> {log.tests_performed}</p>
-                {/if}
-                {#if log.species_matter_tested}<p class="log-field"><strong>Subject:</strong> {log.species_matter_tested}</p>{/if}
-                {#if log.notes}<p class="log-field">{log.notes}</p>{/if}
-              </div>
-            {/each}
-          </div>
-        {/if}
-      </div>
-      <Field label="Decision" type="select" bind:value={conclusionDecision} options={[{value:'approve',label:'Approve'},{value:'reject',label:'Reject'}]} required />
-      <Field label="Review Notes (optional)" type="textarea" bind:value={conclusionReviewNotes} rows={3} />
-      <div class="form-actions">
-        <button class="btn-secondary" onclick={() => conclusionReviewOpen = false}>Cancel</button>
-        <button class="btn-danger" onclick={submitConclusionReview} disabled={!conclusionDecision || !isAuthorizedForConclusion}>
-          {conclusionDecision === 'approve' ? 'Approve Conclusion' : conclusionDecision === 'reject' ? 'Reject Conclusion' : 'Submit Decision'}
-        </button>
-      </div>
-    {/if}
-  </div>
-</Modal>
-
-<!-- Add Daily Log Modal -->
-<Modal bind:open={logOpen} title="Add Daily Log — {logExp?.title ?? ''}">
-  <div class="form">
-    <Field label="Log Date" type="datetime-local" bind:value={logDate} required />
-    <Field label="Personnel Present" bind:value={logPersonnel} placeholder="Names of team members attending" />
-    <Field label="Species / Matter Tested" bind:value={logSpecies} placeholder="What was tested today" />
-
-    <div class="field">
-      <span class="field-label">Tests Performed (select from approved tests)</span>
-      {#if approvedTests.length === 0}
-        <p class="info-text">No approved tests available. Use free text below.</p>
-      {:else}
-        <div class="test-checklist">
-          {#each approvedTests as t}
-            <label class="test-check-item">
-              <input type="checkbox" checked={logLinkedTestIds.includes(t.id)} onchange={() => toggleTestLink(t.id)} />
-              <span class="test-check-label">{t.title}</span>
-              {#if t.methodology}<span class="test-check-meta">{t.methodology.slice(0, 60)}{t.methodology.length > 60 ? '…' : ''}</span>{/if}
-            </label>
-          {/each}
-        </div>
-      {/if}
-      <input class="field-input" style="margin-top:0.4rem" bind:value={logTestsText} placeholder="Or describe tests in free text…" />
-    </div>
-
-    <Field label="Notes / Progress" type="textarea" bind:value={logNotes} rows={3} />
-
-    <div class="field">
-      <label class="discovery-toggle">
-        <input type="checkbox" bind:checked={logNewSpecies} />
-        <span class="field-label" style="display:inline">New species/matter discovered in this log</span>
-      </label>
-    </div>
-
-    {#if logNewSpecies}
-      <div class="discovery-form">
-        <p class="discovery-label">New Discovery Details</p>
-        <Field label="Species / Matter Name" bind:value={logNewSpeciesName} required />
-        <Field label="Classification" bind:value={logNewSpeciesClass} />
-        <Field label="Habitat" bind:value={logNewSpeciesHabitat} />
-        <Field label="Description" type="textarea" bind:value={logNewSpeciesDesc} rows={2} />
-      </div>
-    {/if}
-
-    <div class="form-actions">
-      <button class="btn-secondary" onclick={() => logOpen = false}>Cancel</button>
-      <button class="btn-primary" onclick={submitLog}>Save Log</button>
-    </div>
-  </div>
-</Modal>
-
-<!-- View Logs Modal -->
-<Modal bind:open={viewLogsOpen} title="Logs — {viewLogsExp?.title ?? ''}">
-  <div class="form">
-    {#if viewLogsLoading}
-      <p class="info-text">Loading logs…</p>
-    {:else if viewLogsData.length === 0}
-      <p class="empty">No log entries yet for this experiment.</p>
-    {:else}
-      <div class="logs-scroll" style="max-height:400px">
-        {#each viewLogsData as log}
-          <div class="log-entry">
-            <div class="log-header">
-              <span class="log-date">{log.log_date ?? '—'}</span>
-              {#if log.personnel_present}<span class="log-personnel">👥 {log.personnel_present}</span>{/if}
-            </div>
-            {#if log.linked_test_ids}
-              <p class="log-field"><strong>Tests Linked:</strong> <span class="test-linked">{getLinkedTestNames(log.linked_test_ids)}</span></p>
-            {:else if log.tests_performed}
-              <p class="log-field"><strong>Tests:</strong> {log.tests_performed}</p>
-            {/if}
-            {#if log.species_matter_tested}<p class="log-field"><strong>Subject:</strong> {log.species_matter_tested}</p>{/if}
-            {#if log.notes}<p class="log-field">{log.notes}</p>{/if}
-            {#if log.new_species_proposed}<p class="log-field discovery-badge">🔬 New species proposed to archive</p>{/if}
-          </div>
-        {/each}
-      </div>
-    {/if}
-    <div class="form-actions">
-      <button class="btn-secondary" onclick={() => viewLogsOpen = false}>Close</button>
-    </div>
-  </div>
-</Modal>
-
-<!-- Observer: Assign Experiment Task Modal -->
-<Modal bind:open={assignExpTaskOpen} title="Assign Task to Experiment">
-  <div class="form">
-    <div class="info-block">
-      <p class="info-text">Experiment: <strong>{assignExpTaskExp?.title ?? '—'}</strong></p>
-    </div>
-    <div class="field">
-      <label class="field-label">Assign To</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={assignExpTaskAssignee} />
-    </div>
-    <Field label="Task Title" bind:value={assignExpTaskTitle} required />
-    <Field label="Due Date" type="datetime-local" bind:value={assignExpTaskDue} />
-    <div class="form-actions">
-      <button class="btn-secondary" onclick={() => assignExpTaskOpen = false}>Cancel</button>
-      <button class="btn-primary" onclick={submitAssignExpTask}>Assign Task</button>
-    </div>
-  </div>
-</Modal>
-
 <Modal bind:open={helpReqOpen} title="Send Help Request">
   <div class="form">
     <p class="access-note">🔀 This request will be automatically routed to <strong>The Observer</strong> as proxy director.</p>
@@ -1432,4 +980,18 @@
   .species-cat-fungus { background: rgba(121,85,72,0.15); color: #bcaaa4; }
   .species-cat-other { background: rgba(61,127,255,0.1); color: #8fa3cc; }
   .info-text { font-size: 0.85rem; color: #8fa3cc; margin-bottom: 0.25rem; }
+  /* Experiment card list & filter */
+  .filter-bar { display: flex; gap: 0.375rem; flex-wrap: wrap; margin-bottom: 1rem; }
+  .filter-btn { background: none; border: 1px solid #1e2d4a; border-radius: 3px; color: #4a5d82; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.06em; padding: 0.2rem 0.625rem; text-transform: uppercase; transition: all 0.15s; }
+  .filter-btn.active { border-color: #00d4ff; color: #00d4ff; background: rgba(0,212,255,0.08); }
+  .filter-btn:hover:not(.active) { border-color: #3d7fff; color: #8fa3cc; }
+  .exp-card-list { display: flex; flex-direction: column; gap: 0.625rem; }
+  .exp-card { background: rgba(13,21,40,0.6); border: 1px solid #1e2d4a; border-radius: 6px; cursor: pointer; display: block; padding: 0.875rem 1.125rem; text-align: left; transition: border-color 0.15s, background 0.15s; width: 100%; }
+  .exp-card:hover { background: rgba(61,127,255,0.06); border-color: #3d7fff; }
+  .exp-card-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+  .exp-card-title { color: #e8eeff; font-size: 0.95rem; font-weight: 600; }
+  .exp-card-badges { display: flex; gap: 0.375rem; flex-wrap: wrap; }
+  .exp-card-meta { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.25rem; }
+  .exp-card-preview { color: #4a5d82; font-size: 0.8rem; margin: 0.4rem 0 0; line-height: 1.4; }
+  .meta-chip { background: rgba(61,127,255,0.08); border-radius: 3px; color: #8fa3cc; font-size: 0.72rem; padding: 0.15rem 0.5rem; }
 </style>
