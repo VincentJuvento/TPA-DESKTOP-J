@@ -300,7 +300,7 @@ pub async fn get_chemistry_observer_dashboard(
         status: Option<String>,
         proposed_by: Option<Uuid>,
         reviewed_by: Option<Uuid>,
-        start_date: Option<chrono::DateTime<chrono::Utc>>,
+        start_date: Option<chrono::NaiveDate>,
         conclusion_requested_at: Option<chrono::DateTime<chrono::Utc>>,
     }
 
