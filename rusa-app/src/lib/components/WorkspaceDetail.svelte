@@ -57,7 +57,9 @@
   </div>
 {/if}
 
-{@render body?.()}
+{#if body}
+  {@render body()}
+{/if}
 
 <style>
   .workspace-header {

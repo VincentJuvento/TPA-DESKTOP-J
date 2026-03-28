@@ -41,7 +41,7 @@
         aerospaceApi.getHelpRequests(s.token),
         userApi.getAll(s.token),
       ]);
-      request = requests.find((r: any) => r.id === reqId) ?? null;
+      request = requests.find((r: any) => String(r.id) === String(reqId)) ?? null;
       allUsers = users;
       if (!request) {
         showToast('Help request not found', 'error');
@@ -56,7 +56,7 @@
   async function refresh() {
     const s = $session; if (!s) return;
     const requests = await aerospaceApi.getHelpRequests(s.token);
-    request = requests.find((r: any) => r.id === reqId) ?? null;
+    request = requests.find((r: any) => String(r.id) === String(reqId)) ?? null;
   }
 
   const statusClass = (status: string | undefined) =>
