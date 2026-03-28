@@ -33,7 +33,7 @@
   let testDesc = $state('');
   let testMethod = $state('');
 
-  // Test review only (observer) — experiment actions moved to detail page
+  // Test review only (observer) — experiment review/log/conclusion actions moved to /experiments/[id] detail page
   let reviewOpen = $state(false);
   let reviewTarget: any = $state(null);
   let reviewType = $state<'experiment' | 'test'>('experiment');
@@ -682,5 +682,5 @@
   .discovery-form { background: rgba(0,200,83,0.05); border: 1px solid rgba(0,200,83,0.2); border-radius: 4px; display: flex; flex-direction: column; gap: 0.75rem; padding: 0.875rem; }
   .discovery-label { color: #00c853; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; margin: 0; }
   .dashboard-section { margin-bottom: 2rem; }
-  /* card/filter styles moved to WorkspaceList component */
+  /* card/filter styles moved to WorkspaceList component (src/lib/components/WorkspaceList.svelte) */
 </style>

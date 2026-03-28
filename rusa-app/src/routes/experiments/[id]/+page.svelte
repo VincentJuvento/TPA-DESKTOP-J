@@ -12,6 +12,9 @@
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
+  // Note: experiment logs for both research and chemistry flows are loaded via
+  // researchApi.getExperimentLogs because both use the shared experiment_logs table.
+
   const expId = $derived($page.params.id);
 
   let experiment: any = $state(null);
@@ -169,8 +172,6 @@
         return;
       }
       logsLoading = true;
-      // researchApi.getExperimentLogs works for both research and chemistry experiments
-      // (chemistry experiments share the same experiment_logs table)
       logs = await researchApi.getExperimentLogs(s.token, expId);
       logsLoading = false;
     } catch (e: any) {
@@ -280,7 +281,6 @@
       }
       showToast('Log entry added', 'success');
       logOpen = false;
-      // researchApi.getExperimentLogs works for both research and chemistry (shared table)
       logs = await researchApi.getExperimentLogs(s.token, experiment.id);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }

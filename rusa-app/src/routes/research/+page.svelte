@@ -90,7 +90,7 @@
   let selectedTask: any = $state(null);
   let resultNotes = $state('');
 
-  // Conclusion request and review modals moved to /experiments/[id] detail page
+  // Conclusion request/review, log, and experiment task assignment moved to /experiments/[id] detail page
 
   // Observer dashboard data
   let observerDashboard: any = $state(null);
@@ -962,5 +962,5 @@
   .species-cat-fungus { background: rgba(121,85,72,0.15); color: #bcaaa4; }
   .species-cat-other { background: rgba(61,127,255,0.1); color: #8fa3cc; }
   .info-text { font-size: 0.85rem; color: #8fa3cc; margin-bottom: 0.25rem; }
-  /* card/filter styles moved to WorkspaceList component */
+  /* card/filter styles moved to WorkspaceList component (src/lib/components/WorkspaceList.svelte) */
 </style>
