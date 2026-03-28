@@ -42,18 +42,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Linux dependencies for Tauri
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libglib2.0-dev \
-            libgtk-3-dev \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            postgresql-client \
-            patchelf \
-            xvfb
+          if apt-cache show libwebkit2gtk-4.0-dev >/dev/null 2>&1; then
+            sudo apt-get install -y \
+              libglib2.0-dev \
+              libgtk-3-dev \
+              libwebkit2gtk-4.0-dev \
+              libwebkit2gtk-4.1-dev \
+              libappindicator3-dev \
+              librsvg2-dev \
+              postgresql-client \
+              patchelf \
+              xvfb
+          else
+            sudo apt-get install -y \
+              libglib2.0-dev \
+              libgtk-3-dev \
+              libwebkit2gtk-4.1-dev \
+              libappindicator3-dev \
+              libayatana-appindicator3-dev \
+              librsvg2-dev \
+              postgresql-client \
+              patchelf \
+              xvfb
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -105,4 +119,7 @@ jobs:
         run: sqlx migrate run --source migrations
 
       - name: Run Tauri E2E tests
+        env:
+          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+          GDK_BACKEND: x11
         run: xvfb-run -a npm run test:e2e
