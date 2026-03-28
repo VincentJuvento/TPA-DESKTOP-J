@@ -3,6 +3,7 @@
   import Modal from '$lib/components/Modal.svelte';
   import Field from '$lib/components/Field.svelte';
   import WorkspaceList from '$lib/components/WorkspaceList.svelte';
+  import MasterDetailLayout from '$lib/components/MasterDetailLayout.svelte';
   import { session } from '$lib/stores/auth';
   import { canPerform } from '$lib/stores/permissions';
   import { chemistryApi, researchApi, aerospaceApi, userApi } from '$lib/api';
@@ -71,6 +72,9 @@
   // Status filter for experiments master list
   let expStatusFilter = $state<string>('all');
   let helpStatusFilter = $state<string>('all');
+
+  // Selected experiment for master-detail inline view
+  let selectedExp = $state<any>(null);
   const filteredExperiments = $derived(
     expStatusFilter === 'all'
       ? experiments
@@ -253,6 +257,13 @@
       loadChemDashboard();
     }
   });
+
+  $effect(() => {
+    // Reset the selected experiment when switching away from the experiments tab
+    if (activeTab !== 'experiments') {
+      selectedExp = null;
+    }
+  });
 </script>
 
 <svelte:head><title>RUSA IMS — Chemistry</title></svelte:head>
@@ -330,32 +341,86 @@
       ⚗ Proposing a new matter discovery is treated as an experiment. Each daily log entry <strong>must</strong> reference an approved test from the Test Archive.
       Once concluded, The Observer reviews and officially adds the matter to the archive.
     </p>
-    <WorkspaceList
-      items={filteredExperiments}
-      totalCount={experiments.length}
-      filters={[
-        { value: 'all', label: 'All' },
-        { value: 'pending', label: 'Pending' },
-        { value: 'approved', label: 'Approved' },
-        { value: 'in_progress', label: 'In Progress' },
-        { value: 'conclusion_requested', label: 'Conclusion Requested' },
-        { value: 'completed', label: 'Completed' },
-        { value: 'rejected', label: 'Rejected' }
-      ]}
-      selectedFilter={expStatusFilter}
-      onSelectFilter={(v) => expStatusFilter = v}
-      onItemClick={(exp) => goto(`/experiments/${exp.id}`)}
-      getTitle={(exp) => exp.title}
-      getStatusLabel={(exp) => exp.status ?? '—'}
-      getStatusClass={(exp) => expStatusClass(exp.status)}
-      getTags={(exp) => [
-        ...(exp.start_date ? [`📅 ${new Date(exp.start_date).toLocaleDateString()}`] : []),
-        `By: ${getUserName(exp.proposed_by)}`
-      ]}
-      getBadges={(exp) => exp.conclusion_approved ? [{ label: 'Concluded', className: 'badge-done' }] : []}
-      emptyMessage="No chemistry experiments yet."
-      emptyFilteredMessage="No experiments match the selected filter."
-    />
+    <MasterDetailLayout
+      hasSelection={selectedExp !== null}
+      emptyDetailMessage="Select an experiment to view its summary."
+    >
+      {#snippet master()}
+        <WorkspaceList
+          items={filteredExperiments}
+          totalCount={experiments.length}
+          filters={[
+            { value: 'all', label: 'All' },
+            { value: 'pending', label: 'Pending' },
+            { value: 'approved', label: 'Approved' },
+            { value: 'in_progress', label: 'In Progress' },
+            { value: 'conclusion_requested', label: 'Conclusion Requested' },
+            { value: 'completed', label: 'Completed' },
+            { value: 'rejected', label: 'Rejected' }
+          ]}
+          selectedFilter={expStatusFilter}
+          onSelectFilter={(v) => expStatusFilter = v}
+          onItemClick={(exp) => selectedExp = exp}
+          getTitle={(exp) => exp.title}
+          getStatusLabel={(exp) => exp.status ?? '—'}
+          getStatusClass={(exp) => expStatusClass(exp.status)}
+          getTags={(exp) => [
+            ...(exp.start_date ? [`📅 ${new Date(exp.start_date).toLocaleDateString()}`] : []),
+            `By: ${getUserName(exp.proposed_by)}`
+          ]}
+          getBadges={(exp) => exp.conclusion_approved ? [{ label: 'Concluded', className: 'badge-done' }] : []}
+          emptyMessage="No chemistry experiments yet."
+          emptyFilteredMessage="No experiments match the selected filter."
+        />
+      {/snippet}
+      {#snippet detail()}
+        {#if selectedExp}
+          <div class="exp-detail-panel">
+            <div class="exp-detail-header">
+              <h3 class="exp-detail-title">{selectedExp.title}</h3>
+              <span class="badge {expStatusClass(selectedExp.status)}">{selectedExp.status ?? '—'}</span>
+            </div>
+            {#if selectedExp.conclusion_approved}
+              <span class="badge badge-done" style="align-self:flex-start">Concluded</span>
+            {/if}
+            <div class="exp-detail-meta">
+              <div class="exp-detail-field">
+                <span class="exp-detail-label">Proposed By</span>
+                <span class="exp-detail-value">{getUserName(selectedExp.proposed_by)}</span>
+              </div>
+              {#if selectedExp.start_date}
+                <div class="exp-detail-field">
+                  <span class="exp-detail-label">Start Date</span>
+                  <span class="exp-detail-value">{new Date(selectedExp.start_date).toLocaleDateString()}</span>
+                </div>
+              {/if}
+              {#if selectedExp.end_date}
+                <div class="exp-detail-field">
+                  <span class="exp-detail-label">End Date</span>
+                  <span class="exp-detail-value">{new Date(selectedExp.end_date).toLocaleDateString()}</span>
+                </div>
+              {/if}
+              {#if selectedExp.conclusion_requested_at}
+                <div class="exp-detail-field">
+                  <span class="exp-detail-label">Conclusion Requested</span>
+                  <span class="exp-detail-value">{new Date(selectedExp.conclusion_requested_at).toLocaleDateString()}</span>
+                </div>
+              {/if}
+            </div>
+            {#if selectedExp.description}
+              <div class="exp-detail-desc">
+                <span class="exp-detail-label">Description</span>
+                <p class="exp-detail-desc-text">{selectedExp.description}</p>
+              </div>
+            {/if}
+            <div class="exp-detail-actions">
+              <button class="btn-primary" onclick={() => goto(`/experiments/${selectedExp.id}`)}>Open Full Workspace →</button>
+              <button class="btn-secondary" aria-label="Return to experiment list" onclick={() => selectedExp = null}>← Back to List</button>
+            </div>
+          </div>
+        {/if}
+      {/snippet}
+    </MasterDetailLayout>
 
   {:else if activeTab === 'tests'}
     <div class="section-bar">
@@ -682,5 +747,15 @@
   .discovery-form { background: rgba(0,200,83,0.05); border: 1px solid rgba(0,200,83,0.2); border-radius: 4px; display: flex; flex-direction: column; gap: 0.75rem; padding: 0.875rem; }
   .discovery-label { color: #00c853; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; margin: 0; }
   .dashboard-section { margin-bottom: 2rem; }
+  .exp-detail-panel { display: flex; flex-direction: column; gap: 1rem; padding: 0.25rem 0; }
+  .exp-detail-header { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+  .exp-detail-title { color: #e8eeff; font-size: 1rem; font-weight: 600; margin: 0; flex: 1; }
+  .exp-detail-meta { display: flex; flex-direction: column; gap: 0.5rem; background: rgba(61,127,255,0.05); border: 1px solid #1e2d4a; border-radius: 6px; padding: 0.875rem 1rem; }
+  .exp-detail-field { display: flex; align-items: baseline; gap: 0.75rem; }
+  .exp-detail-label { color: #4a5d82; font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.08em; text-transform: uppercase; min-width: 130px; }
+  .exp-detail-value { color: #c8d8f0; font-size: 0.85rem; }
+  .exp-detail-desc { display: flex; flex-direction: column; gap: 0.375rem; }
+  .exp-detail-desc-text { color: #8fa3cc; font-size: 0.85rem; line-height: 1.6; margin: 0; white-space: pre-wrap; }
+  .exp-detail-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; padding-top: 0.25rem; }
   /* card/filter styles moved to WorkspaceList component (src/lib/components/WorkspaceList.svelte) */
 </style>
