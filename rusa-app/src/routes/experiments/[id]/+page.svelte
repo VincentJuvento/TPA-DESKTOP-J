@@ -163,7 +163,7 @@
         researchApi.getTestArchive(s.token),
         userApi.getAll(s.token),
       ]);
-      experiment = allExps.find((e: any) => e.id === expId) ?? null;
+      experiment = allExps.find((e: any) => String(e.id) === String(expId)) ?? null;
       tests = allTests;
       allUsers = users;
       if (!experiment) {
@@ -202,7 +202,7 @@
   async function refreshExperiment() {
     const s = $session; if (!s) return;
     const allExps = await researchApi.getExperiments(s.token);
-    experiment = allExps.find((e: any) => e.id === expId) ?? null;
+    experiment = allExps.find((e: any) => String(e.id) === String(expId)) ?? null;
   }
 
   async function submitReview() {
