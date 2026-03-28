@@ -2,10 +2,12 @@
   import PageShell from '$lib/components/PageShell.svelte';
   import Modal from '$lib/components/Modal.svelte';
   import Field from '$lib/components/Field.svelte';
+  import WorkspaceList from '$lib/components/WorkspaceList.svelte';
   import { session } from '$lib/stores/auth';
   import { canPerform } from '$lib/stores/permissions';
   import { chemistryApi, researchApi, aerospaceApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
+  import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
 
   type Tab = 'matter_archive' | 'experiments' | 'tests' | 'help_requests' | 'observer_dashboard';
@@ -31,49 +33,12 @@
   let testDesc = $state('');
   let testMethod = $state('');
 
-  // Experiment review (observer)
+  // Test review only (observer) — experiment review/log/conclusion actions moved to /experiments/[id] detail page
   let reviewOpen = $state(false);
   let reviewTarget: any = $state(null);
   let reviewType = $state<'experiment' | 'test'>('experiment');
   let reviewStatus = $state('');
   let reviewNotes = $state('');
-
-  // Add chemistry log form
-  let logOpen = $state(false);
-  let logExp: any = $state(null);
-  let logDate = $state('');
-  let logMatter = $state('');
-  let logPersonnel = $state('');
-  let logLinkedTestId = $state('');
-  let logNotes = $state('');
-
-  // View logs
-  let viewLogsOpen = $state(false);
-  let viewLogsExp: any = $state(null);
-  let viewLogsData: any[] = $state([]);
-  let viewLogsLoading = $state(false);
-
-  // Conclusion request form (chemist)
-  let conclusionReqOpen = $state(false);
-  let conclusionReqExp: any = $state(null);
-  let conclusionFinalNotes = $state('');
-  let conclusionFinalFindings = $state('');
-  let conclusionMethodology = $state('');
-  let conclusionKeyResults = $state('');
-  let conclusionRecommendations = $state('');
-  let conclusionLimitations = $state('');
-
-  // Conclusion review + matter creation form (observer)
-  let conclusionReviewOpen = $state(false);
-  let conclusionReviewTarget: any = $state(null);
-  let conclusionReviewLogs: any[] = $state([]);
-  let conclusionReviewLoading = $state(false);
-  let conclusionDecision = $state('');
-  let conclusionReviewNotes = $state('');
-  let matterName = $state('');
-  let matterClassification = $state('');
-  let matterType = $state('');
-  let matterProperties = $state('');
 
   // Help request form
   let helpReqOpen = $state(false);
@@ -101,23 +66,20 @@
   const isObserver = $derived(canPerform($session, 'the_observer'));
   const isChemist = $derived($session?.role_name === 'chemist' || $session?.role_name === 'physicist');
   const canReview = $derived(isObserver);
-  const approvedTests = $derived(tests.filter((t: any) => t.status === 'approved'));
   const pendingConclusions = $derived(experiments.filter((e: any) => e.status === 'conclusion_requested'));
+
+  // Status filter for experiments master list
+  let expStatusFilter = $state<string>('all');
+  let helpStatusFilter = $state<string>('all');
+  const filteredExperiments = $derived(
+    expStatusFilter === 'all'
+      ? experiments
+      : experiments.filter((e: any) => e.status === expStatusFilter)
+  );
 
   const helpResolveOpts = [
     { value: 'in_review', label: 'Mark In Review' },
     { value: 'closed', label: 'Close' },
-  ];
-
-  const matterTypOpts = [
-    { value: '', label: '— Select —' },
-    { value: 'mineral', label: 'Mineral' },
-    { value: 'alloy', label: 'Alloy' },
-    { value: 'compound', label: 'Chemical Compound' },
-    { value: 'composite', label: 'Composite Material' },
-    { value: 'crystal', label: 'Crystal' },
-    { value: 'polymer', label: 'Polymer' },
-    { value: 'other', label: 'Other' },
   ];
 
   function expStatusClass(status: string | null) {
@@ -136,21 +98,6 @@
     if (!userId) return '—';
     const u = allUsers.find((u: any) => u.id === userId);
     return u ? (u.full_name ?? u.username ?? userId) : userId;
-  }
-
-  function getLinkedTestName(testId: string | null): string {
-    if (!testId) return '—';
-    try {
-      const ids: string[] = JSON.parse(testId);
-      if (Array.isArray(ids)) {
-        return ids.map(id => {
-          const t = tests.find((t: any) => t.id === id);
-          return t ? t.title : id.slice(0, 8) + '…';
-        }).join(', ');
-      }
-    } catch {}
-    const t = tests.find((t: any) => t.id === testId);
-    return t ? t.title : testId.slice(0, 8) + '…';
   }
 
   onMount(async () => {
@@ -216,125 +163,9 @@
       return;
     }
     try {
-      if (reviewType === 'experiment') {
-        await researchApi.reviewExperiment(s.token, reviewTarget.id, reviewStatus, reviewNotes || undefined);
-        const all = await researchApi.getExperiments(s.token);
-        experiments = all.filter((e: any) => e.experiment_type === 'new_matter');
-      } else {
-        await researchApi.reviewTest(s.token, reviewTarget.id, reviewStatus, reviewNotes || undefined);
-        tests = await researchApi.getTestArchive(s.token);
-      }
+      await researchApi.reviewTest(s.token, reviewTarget.id, reviewStatus, reviewNotes || undefined);
+      tests = await researchApi.getTestArchive(s.token);
       showToast('Review submitted', 'success'); reviewOpen = false;
-    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
-  }
-
-  // ── Chemistry Log ────────────────────────────────────────────────────────
-
-  function openAddLog(exp: any) {
-    logExp = exp;
-    logDate = new Date().toISOString().slice(0, 16);
-    logMatter = ''; logPersonnel = ''; logLinkedTestId = ''; logNotes = '';
-    logOpen = true;
-  }
-
-  async function submitLog() {
-    const s = $session; if (!s || !logExp) return;
-    if (!logDate) { showToast('Log date is required', 'error'); return; }
-    if (!logLinkedTestId) { showToast('A linked test from the Test Archive is required', 'error'); return; }
-    try {
-      const dateVal = logDate.includes('T')
-        ? new Date(logDate).toISOString()
-        : new Date(logDate + 'T00:00:00Z').toISOString();
-      await chemistryApi.addChemistryLog(
-        s.token, logExp.id, dateVal, logLinkedTestId,
-        logMatter || undefined, logPersonnel || undefined, logNotes || undefined,
-      );
-      showToast('Log entry added', 'success');
-      logOpen = false;
-      const all = await researchApi.getExperiments(s.token);
-      experiments = all.filter((e: any) => e.experiment_type === 'new_matter');
-    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
-  }
-
-  // ── View Logs ────────────────────────────────────────────────────────────
-
-  async function openViewLogs(exp: any) {
-    const s = $session; if (!s) return;
-    viewLogsExp = exp; viewLogsData = []; viewLogsLoading = true; viewLogsOpen = true;
-    try {
-      viewLogsData = await researchApi.getExperimentLogs(s.token, exp.id);
-    } catch { viewLogsData = []; }
-    viewLogsLoading = false;
-  }
-
-  // ── Conclusion Request (Chemist) ─────────────────────────────────────────
-
-  function openConclusionRequest(exp: any) {
-    conclusionReqExp = exp;
-    conclusionFinalNotes = exp.final_notes ?? '';
-    conclusionFinalFindings = exp.final_findings ?? '';
-    conclusionMethodology = exp.methodology_summary ?? '';
-    conclusionKeyResults = exp.key_results ?? '';
-    conclusionRecommendations = exp.recommendations ?? '';
-    conclusionLimitations = exp.limitations ?? '';
-    conclusionReqOpen = true;
-  }
-
-  async function submitConclusionRequest() {
-    const s = $session; if (!s || !conclusionReqExp) return;
-    if (!conclusionFinalNotes.trim()) { showToast('Final summary is required', 'error'); return; }
-    if (!conclusionMethodology.trim()) { showToast('Methodology summary is required', 'error'); return; }
-    if (!conclusionKeyResults.trim()) { showToast('Key results are required', 'error'); return; }
-    try {
-      await researchApi.requestConclusion(
-        s.token, conclusionReqExp.id, conclusionFinalNotes,
-        conclusionFinalFindings || undefined, conclusionMethodology || undefined,
-        conclusionKeyResults || undefined, conclusionRecommendations || undefined,
-        conclusionLimitations || undefined,
-      );
-      showToast('Conclusion request submitted', 'success');
-      conclusionReqOpen = false;
-      const all = await researchApi.getExperiments(s.token);
-      experiments = all.filter((e: any) => e.experiment_type === 'new_matter');
-    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
-  }
-
-  // ── Conclusion Review + Matter Archive (Observer) ─────────────────────────
-
-  async function openConclusionReview(exp: any) {
-    const s = $session; if (!s) return;
-    conclusionReviewTarget = exp;
-    conclusionDecision = ''; conclusionReviewNotes = '';
-    matterName = exp.title ?? ''; matterClassification = '';
-    matterType = ''; matterProperties = '';
-    conclusionReviewLoading = true; conclusionReviewOpen = true;
-    try {
-      conclusionReviewLogs = await researchApi.getExperimentLogs(s.token, exp.id);
-    } catch { conclusionReviewLogs = []; }
-    conclusionReviewLoading = false;
-  }
-
-  async function submitConclusionReview() {
-    const s = $session; if (!s || !conclusionReviewTarget) return;
-    if (!conclusionDecision) { showToast('Decision required', 'error'); return; }
-    if (conclusionDecision === 'approve' && !matterName.trim()) {
-      showToast('Matter name is required when approving', 'error'); return;
-    }
-    try {
-      await chemistryApi.approveChemistryConclusion(
-        s.token, conclusionReviewTarget.id, conclusionDecision,
-        matterName, matterClassification || undefined,
-        matterType || undefined, matterProperties || undefined,
-        conclusionReviewNotes || undefined,
-      );
-      showToast(conclusionDecision === 'approve' ? 'Conclusion approved — matter added to archive' : 'Conclusion rejected', 'success');
-      conclusionReviewOpen = false;
-      const [all, newMatters] = await Promise.all([
-        researchApi.getExperiments(s.token),
-        chemistryApi.getMatterArchive(s.token),
-      ]);
-      experiments = all.filter((e: any) => e.experiment_type === 'new_matter');
-      matters = newMatters;
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
@@ -499,53 +330,32 @@
       ⚗ Proposing a new matter discovery is treated as an experiment. Each daily log entry <strong>must</strong> reference an approved test from the Test Archive.
       Once concluded, The Observer reviews and officially adds the matter to the archive.
     </p>
-    {#if experiments.length === 0}
-      <p class="empty">No chemistry experiments yet.</p>
-    {:else}
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Title</th>
-              <th>Status</th>
-              <th>Start Date</th>
-              <th>Proposed By</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each experiments as exp}
-              <tr>
-                <td>{exp.title}</td>
-                <td>
-                  <span class="badge {expStatusClass(exp.status)}">{exp.status ?? '—'}</span>
-                  {#if exp.conclusion_approved}
-                    <span class="badge badge-done" style="margin-left:4px">Concluded</span>
-                  {/if}
-                </td>
-                <td>{exp.start_date ? new Date(exp.start_date).toLocaleDateString() : '—'}</td>
-                <td>{getUserName(exp.proposed_by)}</td>
-                <td class="actions-cell">
-                  <button class="btn-small" onclick={() => openViewLogs(exp)}>View Logs</button>
-                  {#if exp.status === 'in_progress' && (isChemist || isObserver)}
-                    <button class="btn-small btn-add" onclick={() => openAddLog(exp)}>+ Log</button>
-                  {/if}
-                  {#if canReview && (exp.status === 'pending' || exp.status === 'approved')}
-                    <button class="btn-small" onclick={() => openReview(exp, 'experiment')}>Review</button>
-                  {/if}
-                  {#if exp.status === 'in_progress' && exp.proposed_by === $session?.user_id}
-                    <button class="btn-small btn-conclude" onclick={() => openConclusionRequest(exp)}>Request Conclusion</button>
-                  {/if}
-                  {#if isObserver && exp.status === 'conclusion_requested'}
-                    <button class="btn-small btn-conclude" onclick={() => openConclusionReview(exp)}>Review Conclusion</button>
-                  {/if}
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    {/if}
+    <WorkspaceList
+      items={filteredExperiments}
+      totalCount={experiments.length}
+      filters={[
+        { value: 'all', label: 'All' },
+        { value: 'pending', label: 'Pending' },
+        { value: 'approved', label: 'Approved' },
+        { value: 'in_progress', label: 'In Progress' },
+        { value: 'conclusion_requested', label: 'Conclusion Requested' },
+        { value: 'completed', label: 'Completed' },
+        { value: 'rejected', label: 'Rejected' }
+      ]}
+      selectedFilter={expStatusFilter}
+      onSelectFilter={(v) => expStatusFilter = v}
+      onItemClick={(exp) => goto(`/experiments/${exp.id}`)}
+      getTitle={(exp) => exp.title}
+      getStatusLabel={(exp) => exp.status ?? '—'}
+      getStatusClass={(exp) => expStatusClass(exp.status)}
+      getTags={(exp) => [
+        ...(exp.start_date ? [`📅 ${new Date(exp.start_date).toLocaleDateString()}`] : []),
+        `By: ${getUserName(exp.proposed_by)}`
+      ]}
+      getBadges={(exp) => exp.conclusion_approved ? [{ label: 'Concluded', className: 'badge-done' }] : []}
+      emptyMessage="No chemistry experiments yet."
+      emptyFilteredMessage="No experiments match the selected filter."
+    />
 
   {:else if activeTab === 'tests'}
     <div class="section-bar">
@@ -595,51 +405,33 @@
         <button class="btn-primary" onclick={() => helpReqOpen = true}>+ Send Help Request</button>
       {/if}
     </div>
-    {#if helpRequests.length === 0}
-      <p class="empty">No help requests.</p>
-    {:else}
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Title</th>
-              <th>Status</th>
-              <th>Proxy Director</th>
-              <th>Category</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each helpRequests as req}
-              <tr>
-                <td>{req.title}</td>
-                <td><span class="badge {req.status === 'open' ? 'badge-open' : req.status === 'resolved' ? 'badge-done' : req.status === 'rejected' ? 'badge-rejected' : 'badge-progress'}">{req.status}</span></td>
-                <td><span class="proxy-badge">{req.assigned_proxy_director}</span></td>
-                <td>{req.category ?? '—'}</td>
-                <td class="actions-cell">
-                  {#if isObserver}
-                    {#if req.status === 'open' || req.status === 'in_review'}
-                      <button class="btn-small" onclick={() => openHelpResolve(req)}>Mark Review</button>
-                      <button class="btn-small btn-add" onclick={() => openHelpApprove(req)}>Approve</button>
-                      <button class="btn-small btn-danger-sm" onclick={() => openHelpReject(req)}>Reject</button>
-                    {/if}
-                    {#if req.status === 'converted'}
-                      <button class="btn-small btn-observer" onclick={() => openHelpDeliver(req)}>Deliver Response</button>
-                    {/if}
-                  {:else}
-                    {#if req.rejection_reason}
-                      <span class="notes-preview" title={req.rejection_reason}>❌ {req.rejection_reason}</span>
-                    {:else if req.response}
-                      <span class="notes-preview" title={req.response}>✅ {req.response}</span>
-                    {/if}
-                  {/if}
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    {/if}
+    <WorkspaceList
+      items={helpStatusFilter === 'all' ? helpRequests : helpRequests.filter((r: any) => r.status === helpStatusFilter)}
+      totalCount={helpRequests.length}
+      filters={[
+        { value: 'all', label: 'All' },
+        { value: 'open', label: 'Open' },
+        { value: 'in_review', label: 'In Review' },
+        { value: 'converted', label: 'Converted' },
+        { value: 'resolved', label: 'Resolved' },
+        { value: 'closed', label: 'Closed' },
+        { value: 'rejected', label: 'Rejected' }
+      ]}
+      selectedFilter={helpStatusFilter}
+      onSelectFilter={(v) => helpStatusFilter = v}
+      onItemClick={(req) => goto(`/help-requests/${req.id}`)}
+      getTitle={(req) => req.title}
+      getStatusLabel={(req) => req.status ?? '—'}
+      getStatusClass={(req) => req.status === 'open' ? 'badge-open' : req.status === 'resolved' || req.status === 'closed' ? 'badge-done' : req.status === 'rejected' ? 'badge-rejected' : 'badge-progress'}
+      getTags={(req) => [
+        ...(req.assigned_proxy_director ? [`👤 ${req.assigned_proxy_director}`] : []),
+        ...(req.category ? [`📂 ${req.category}`] : []),
+        ...(req.created_at ? [`📅 ${new Date(req.created_at).toLocaleDateString()}`] : [])
+      ]}
+      getPreview={(req) => req.rejection_reason ? `❌ ${req.rejection_reason}` : (req.response ? `✅ ${req.response}` : '')}
+      emptyMessage="No help requests."
+      emptyFilteredMessage="No help requests match the selected filter."
+    />
 
   {:else if activeTab === 'observer_dashboard' && isObserver}
     <div class="section-bar">
@@ -665,9 +457,7 @@
                     <td>{exp.start_date ? new Date(exp.start_date).toLocaleDateString() : '—'}</td>
                     <td>{getUserName(exp.proposed_by)}</td>
                     <td class="actions-cell">
-                      {#if exp.status === 'conclusion_requested'}
-                        <button class="btn-small btn-conclude" onclick={() => openConclusionReview(exp)}>Review Conclusion</button>
-                      {/if}
+                      <button class="btn-small" onclick={() => goto(`/experiments/${exp.id}`)}>Open Workspace</button>
                     </td>
                   </tr>
                 {/each}
@@ -681,21 +471,18 @@
         {#if chemDashboard.pending_conclusions?.length === 0}
           <p class="empty">No pending conclusions.</p>
         {:else}
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead><tr><th>Title</th><th>Requested At</th><th>Actions</th></tr></thead>
-              <tbody>
-                {#each chemDashboard.pending_conclusions as exp}
-                  <tr>
-                    <td>{exp.title}</td>
-                    <td>{exp.conclusion_requested_at ? new Date(exp.conclusion_requested_at).toLocaleDateString() : '—'}</td>
-                    <td class="actions-cell">
-                      <button class="btn-small btn-conclude" onclick={() => openConclusionReview(exp)}>Review Conclusion</button>
-                    </td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
+          <div class="exp-card-list">
+            {#each chemDashboard.pending_conclusions as exp}
+              <button class="exp-card" onclick={() => goto(`/experiments/${exp.id}`)}>
+                <div class="exp-card-header">
+                  <span class="exp-card-title">{exp.title}</span>
+                  <span class="badge badge-conclude">Conclusion Requested</span>
+                </div>
+                <div class="exp-card-meta">
+                  {#if exp.conclusion_requested_at}<span class="meta-chip">📅 {new Date(exp.conclusion_requested_at).toLocaleDateString()}</span>{/if}
+                </div>
+              </button>
+            {/each}
           </div>
         {/if}
       </div>
@@ -734,8 +521,8 @@
   </div>
 </Modal>
 
-<!-- Review Modal (experiment or test) -->
-<Modal bind:open={reviewOpen} title="Review — {reviewType === 'experiment' ? 'Experiment' : 'Test Proposal'}">
+<!-- Review Modal (test only — experiment review now in /experiments/[id]) -->
+<Modal bind:open={reviewOpen} title="Review — Test Proposal">
   <div class="form">
     {#if reviewTarget}
       <div class="info-block">
@@ -747,7 +534,6 @@
     <Field label="Decision" type="select" bind:value={reviewStatus} options={[
       { value: '', label: '— Select —' },
       { value: 'approved', label: 'Approve' },
-      ...(reviewType === 'experiment' ? [{ value: 'in_progress', label: 'Approve & Start' }] : []),
       { value: 'rejected', label: 'Reject' },
     ]} required />
     <Field label="Notes (optional)" type="textarea" bind:value={reviewNotes} rows={3} />
@@ -755,144 +541,6 @@
       <button class="btn-secondary" onclick={() => reviewOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={submitReview}>Submit Review</button>
     </div>
-  </div>
-</Modal>
-
-<!-- Add Chemistry Log Modal -->
-<Modal bind:open={logOpen} title="Add Daily Log — {logExp?.title ?? ''}">
-  <div class="form">
-    <p class="access-note">⚠️ Each log entry must reference an approved test from the Test Archive (procedure and expected outcome).</p>
-    <Field label="Log Date" type="datetime-local" bind:value={logDate} required />
-    <div class="field">
-      <label class="field-label">Linked Test (required) *</label>
-      <select class="field-input" bind:value={logLinkedTestId}>
-        <option value="">— Select an approved test —</option>
-        {#each approvedTests as t}
-          <option value={t.id}>{t.title}{#if t.methodology} — {t.methodology.slice(0, 60)}{/if}</option>
-        {/each}
-      </select>
-      {#if approvedTests.length === 0}
-        <p class="access-note" style="margin-top:0.25rem">No approved tests available. Propose a test first and wait for Observer approval.</p>
-      {/if}
-    </div>
-    <Field label="Matter Being Tested / Observed" bind:value={logMatter} placeholder="e.g. Unknown mineral sample #4" />
-    <Field label="Personnel Present (optional)" bind:value={logPersonnel} />
-    <Field label="Notes / Findings" type="textarea" bind:value={logNotes} rows={4} />
-    <div class="form-actions">
-      <button class="btn-secondary" onclick={() => logOpen = false}>Cancel</button>
-      <button class="btn-primary" onclick={submitLog}>Save Log</button>
-    </div>
-  </div>
-</Modal>
-
-<!-- View Logs Modal -->
-<Modal bind:open={viewLogsOpen} title="Logs — {viewLogsExp?.title ?? ''}">
-  <div class="form">
-    {#if viewLogsLoading}
-      <p class="info-text">Loading logs…</p>
-    {:else if viewLogsData.length === 0}
-      <p class="empty">No log entries yet for this experiment.</p>
-    {:else}
-      <div class="logs-scroll">
-        {#each viewLogsData as log}
-          <div class="log-entry">
-            <div class="log-header">
-              <span class="log-date">{log.log_date ?? '—'}</span>
-              {#if log.personnel_present}<span class="log-personnel">👥 {log.personnel_present}</span>{/if}
-            </div>
-            {#if log.linked_test_ids}
-              <p class="log-field"><strong>Test Referenced:</strong> <span class="test-linked">{getLinkedTestName(log.linked_test_ids)}</span></p>
-            {/if}
-            <!-- species_matter_tested is the shared DB column; for chemistry logs it holds the matter name -->
-            {#if log.species_matter_tested}<p class="log-field"><strong>Matter:</strong> {log.species_matter_tested}</p>{/if}
-            {#if log.notes}<p class="log-field">{log.notes}</p>{/if}
-          </div>
-        {/each}
-      </div>
-    {/if}
-    <div class="form-actions">
-      <button class="btn-secondary" onclick={() => viewLogsOpen = false}>Close</button>
-    </div>
-  </div>
-</Modal>
-
-<!-- Conclusion Request Modal (Chemist) -->
-<Modal bind:open={conclusionReqOpen} title="Request Conclusion — {conclusionReqExp?.title ?? ''}">
-  <div class="form">
-    <p class="access-note">📄 Submit your final conclusion document describing the matter's properties. The Observer will review and officially add it to the Matter Archive upon approval.</p>
-    <Field label="Final Summary *" type="textarea" bind:value={conclusionFinalNotes} rows={3} required />
-    <Field label="Key Findings on Matter Properties *" type="textarea" bind:value={conclusionFinalFindings} rows={3} />
-    <Field label="Methodology Summary *" type="textarea" bind:value={conclusionMethodology} rows={3} required />
-    <Field label="Key Results *" type="textarea" bind:value={conclusionKeyResults} rows={3} required />
-    <Field label="Recommendations (optional)" type="textarea" bind:value={conclusionRecommendations} rows={2} />
-    <Field label="Limitations (optional)" type="textarea" bind:value={conclusionLimitations} rows={2} />
-    <div class="form-actions">
-      <button class="btn-secondary" onclick={() => conclusionReqOpen = false}>Cancel</button>
-      <button class="btn-primary" onclick={submitConclusionRequest}>Submit Conclusion Request</button>
-    </div>
-  </div>
-</Modal>
-
-<!-- Conclusion Review Modal (Observer) -->
-<Modal bind:open={conclusionReviewOpen} title="Review Conclusion — {conclusionReviewTarget?.title ?? ''}">
-  <div class="form">
-    {#if conclusionReviewLoading}
-      <p class="info-text">Loading logs…</p>
-    {:else}
-      {#if conclusionReviewTarget}
-        <div class="info-block">
-          {#if conclusionReviewTarget.final_notes}
-            <p class="info-text"><strong>Final Summary:</strong> {conclusionReviewTarget.final_notes}</p>
-          {/if}
-          {#if conclusionReviewTarget.final_findings}
-            <p class="info-text"><strong>Matter Properties:</strong> {conclusionReviewTarget.final_findings}</p>
-          {/if}
-          {#if conclusionReviewTarget.methodology_summary}
-            <p class="info-text"><strong>Methodology:</strong> {conclusionReviewTarget.methodology_summary}</p>
-          {/if}
-          {#if conclusionReviewTarget.key_results}
-            <p class="info-text"><strong>Key Results:</strong> {conclusionReviewTarget.key_results}</p>
-          {/if}
-        </div>
-        <div class="subsection-title" style="margin:0.5rem 0 0.25rem">Experiment Logs ({conclusionReviewLogs.length})</div>
-        <div class="logs-scroll" style="max-height:150px">
-          {#each conclusionReviewLogs as log}
-            <div class="log-entry">
-              <div class="log-header">
-                <span class="log-date">{log.log_date ?? '—'}</span>
-              </div>
-              {#if log.linked_test_ids}
-                <p class="log-field"><strong>Test:</strong> <span class="test-linked">{getLinkedTestName(log.linked_test_ids)}</span></p>
-              {/if}
-              <!-- species_matter_tested is the shared DB column; for chemistry logs it holds the matter name -->
-              {#if log.species_matter_tested}<p class="log-field"><strong>Matter:</strong> {log.species_matter_tested}</p>{/if}
-              {#if log.notes}<p class="log-field">{log.notes}</p>{/if}
-            </div>
-          {/each}
-        </div>
-      {/if}
-      <Field label="Decision" type="select" bind:value={conclusionDecision} options={[
-        { value: '', label: '— Select —' },
-        { value: 'approve', label: 'Approve — Add to Matter Archive' },
-        { value: 'reject', label: 'Reject — Return to In Progress' },
-      ]} required />
-      {#if conclusionDecision === 'approve'}
-        <div class="discovery-form">
-          <p class="discovery-label">Matter Archive Entry</p>
-          <Field label="Matter Name *" bind:value={matterName} required />
-          <Field label="Classification (optional)" bind:value={matterClassification} placeholder="e.g. Silicate, Ferrous Alloy" />
-          <Field label="Matter Type" type="select" bind:value={matterType} options={matterTypOpts} />
-          <Field label="Properties / Description" type="textarea" bind:value={matterProperties} rows={3} placeholder="Chemical/physical properties for the archive record" />
-        </div>
-      {/if}
-      <Field label="Review Notes (optional)" type="textarea" bind:value={conclusionReviewNotes} rows={2} />
-      <div class="form-actions">
-        <button class="btn-secondary" onclick={() => conclusionReviewOpen = false}>Cancel</button>
-        <button class="btn-primary" onclick={submitConclusionReview} disabled={!conclusionDecision || (conclusionDecision === 'approve' && !matterName.trim())}>
-          {conclusionDecision === 'approve' ? 'Approve & Add to Archive' : conclusionDecision === 'reject' ? 'Reject Conclusion' : 'Submit Review'}
-        </button>
-      </div>
-    {/if}
   </div>
 </Modal>
 
@@ -1034,4 +682,5 @@
   .discovery-form { background: rgba(0,200,83,0.05); border: 1px solid rgba(0,200,83,0.2); border-radius: 4px; display: flex; flex-direction: column; gap: 0.75rem; padding: 0.875rem; }
   .discovery-label { color: #00c853; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; margin: 0; }
   .dashboard-section { margin-bottom: 2rem; }
+  /* card/filter styles moved to WorkspaceList component (src/lib/components/WorkspaceList.svelte) */
 </style>
