@@ -2,6 +2,7 @@
   import PageShell from '$lib/components/PageShell.svelte';
   import Modal from '$lib/components/Modal.svelte';
   import Field from '$lib/components/Field.svelte';
+  import WorkspaceList from '$lib/components/WorkspaceList.svelte';
   import { session } from '$lib/stores/auth';
   import { canPerform } from '$lib/stores/permissions';
   import { chemistryApi, researchApi, aerospaceApi, userApi } from '$lib/api';
@@ -69,6 +70,7 @@
 
   // Status filter for experiments master list
   let expStatusFilter = $state<string>('all');
+  let helpStatusFilter = $state<string>('all');
   const filteredExperiments = $derived(
     expStatusFilter === 'all'
       ? experiments
@@ -78,17 +80,6 @@
   const helpResolveOpts = [
     { value: 'in_review', label: 'Mark In Review' },
     { value: 'closed', label: 'Close' },
-  ];
-
-  const matterTypOpts = [
-    { value: '', label: '— Select —' },
-    { value: 'mineral', label: 'Mineral' },
-    { value: 'alloy', label: 'Alloy' },
-    { value: 'compound', label: 'Chemical Compound' },
-    { value: 'composite', label: 'Composite Material' },
-    { value: 'crystal', label: 'Crystal' },
-    { value: 'polymer', label: 'Polymer' },
-    { value: 'other', label: 'Other' },
   ];
 
   function expStatusClass(status: string | null) {
@@ -339,35 +330,32 @@
       ⚗ Proposing a new matter discovery is treated as an experiment. Each daily log entry <strong>must</strong> reference an approved test from the Test Archive.
       Once concluded, The Observer reviews and officially adds the matter to the archive.
     </p>
-    <!-- Status filter -->
-    <div class="filter-bar">
-      {#each [['all','All'], ['pending','Pending'], ['approved','Approved'], ['in_progress','In Progress'], ['conclusion_requested','Conclusion Requested'], ['completed','Completed'], ['rejected','Rejected']] as [val, label]}
-        <button class="filter-btn" class:active={expStatusFilter === val} onclick={() => expStatusFilter = val}>{label}</button>
-      {/each}
-    </div>
-    {#if filteredExperiments.length === 0}
-      <p class="empty">{experiments.length === 0 ? 'No chemistry experiments yet.' : 'No experiments match the selected filter.'}</p>
-    {:else}
-      <div class="exp-card-list">
-        {#each filteredExperiments as exp}
-          <button class="exp-card" onclick={() => goto(`/experiments/${exp.id}`)}>
-            <div class="exp-card-header">
-              <span class="exp-card-title">{exp.title}</span>
-              <div class="exp-card-badges">
-                <span class="badge {expStatusClass(exp.status)}">{exp.status ?? '—'}</span>
-                {#if exp.conclusion_approved}
-                  <span class="badge badge-done">Concluded</span>
-                {/if}
-              </div>
-            </div>
-            <div class="exp-card-meta">
-              {#if exp.start_date}<span class="meta-chip">📅 {new Date(exp.start_date).toLocaleDateString()}</span>{/if}
-              <span class="meta-chip">By: {getUserName(exp.proposed_by)}</span>
-            </div>
-          </button>
-        {/each}
-      </div>
-    {/if}
+    <WorkspaceList
+      items={filteredExperiments}
+      totalCount={experiments.length}
+      filters={[
+        { value: 'all', label: 'All' },
+        { value: 'pending', label: 'Pending' },
+        { value: 'approved', label: 'Approved' },
+        { value: 'in_progress', label: 'In Progress' },
+        { value: 'conclusion_requested', label: 'Conclusion Requested' },
+        { value: 'completed', label: 'Completed' },
+        { value: 'rejected', label: 'Rejected' }
+      ]}
+      selectedFilter={expStatusFilter}
+      onSelectFilter={(v) => expStatusFilter = v}
+      onItemClick={(exp) => goto(`/experiments/${exp.id}`)}
+      getTitle={(exp) => exp.title}
+      getStatusLabel={(exp) => exp.status ?? '—'}
+      getStatusClass={(exp) => expStatusClass(exp.status)}
+      getTags={(exp) => [
+        ...(exp.start_date ? [`📅 ${new Date(exp.start_date).toLocaleDateString()}`] : []),
+        `By: ${getUserName(exp.proposed_by)}`
+      ]}
+      getBadges={(exp) => exp.conclusion_approved ? [{ label: 'Concluded', className: 'badge-done' }] : []}
+      emptyMessage="No chemistry experiments yet."
+      emptyFilteredMessage="No experiments match the selected filter."
+    />
 
   {:else if activeTab === 'tests'}
     <div class="section-bar">
@@ -417,51 +405,33 @@
         <button class="btn-primary" onclick={() => helpReqOpen = true}>+ Send Help Request</button>
       {/if}
     </div>
-    {#if helpRequests.length === 0}
-      <p class="empty">No help requests.</p>
-    {:else}
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Title</th>
-              <th>Status</th>
-              <th>Proxy Director</th>
-              <th>Category</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each helpRequests as req}
-              <tr>
-                <td>{req.title}</td>
-                <td><span class="badge {req.status === 'open' ? 'badge-open' : req.status === 'resolved' ? 'badge-done' : req.status === 'rejected' ? 'badge-rejected' : 'badge-progress'}">{req.status}</span></td>
-                <td><span class="proxy-badge">{req.assigned_proxy_director}</span></td>
-                <td>{req.category ?? '—'}</td>
-                <td class="actions-cell">
-                  {#if isObserver}
-                    {#if req.status === 'open' || req.status === 'in_review'}
-                      <button class="btn-small" onclick={() => openHelpResolve(req)}>Mark Review</button>
-                      <button class="btn-small btn-add" onclick={() => openHelpApprove(req)}>Approve</button>
-                      <button class="btn-small btn-danger-sm" onclick={() => openHelpReject(req)}>Reject</button>
-                    {/if}
-                    {#if req.status === 'converted'}
-                      <button class="btn-small btn-observer" onclick={() => openHelpDeliver(req)}>Deliver Response</button>
-                    {/if}
-                  {:else}
-                    {#if req.rejection_reason}
-                      <span class="notes-preview" title={req.rejection_reason}>❌ {req.rejection_reason}</span>
-                    {:else if req.response}
-                      <span class="notes-preview" title={req.response}>✅ {req.response}</span>
-                    {/if}
-                  {/if}
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    {/if}
+    <WorkspaceList
+      items={helpStatusFilter === 'all' ? helpRequests : helpRequests.filter((r: any) => r.status === helpStatusFilter)}
+      totalCount={helpRequests.length}
+      filters={[
+        { value: 'all', label: 'All' },
+        { value: 'open', label: 'Open' },
+        { value: 'in_review', label: 'In Review' },
+        { value: 'converted', label: 'Converted' },
+        { value: 'resolved', label: 'Resolved' },
+        { value: 'closed', label: 'Closed' },
+        { value: 'rejected', label: 'Rejected' }
+      ]}
+      selectedFilter={helpStatusFilter}
+      onSelectFilter={(v) => helpStatusFilter = v}
+      onItemClick={(req) => goto(`/help-requests/${req.id}`)}
+      getTitle={(req) => req.title}
+      getStatusLabel={(req) => req.status ?? '—'}
+      getStatusClass={(req) => req.status === 'open' ? 'badge-open' : req.status === 'resolved' || req.status === 'closed' ? 'badge-done' : req.status === 'rejected' ? 'badge-rejected' : 'badge-progress'}
+      getTags={(req) => [
+        ...(req.assigned_proxy_director ? [`👤 ${req.assigned_proxy_director}`] : []),
+        ...(req.category ? [`📂 ${req.category}`] : []),
+        ...(req.created_at ? [`📅 ${new Date(req.created_at).toLocaleDateString()}`] : [])
+      ]}
+      getPreview={(req) => req.rejection_reason ? `❌ ${req.rejection_reason}` : (req.response ? `✅ ${req.response}` : '')}
+      emptyMessage="No help requests."
+      emptyFilteredMessage="No help requests match the selected filter."
+    />
 
   {:else if activeTab === 'observer_dashboard' && isObserver}
     <div class="section-bar">
@@ -712,17 +682,5 @@
   .discovery-form { background: rgba(0,200,83,0.05); border: 1px solid rgba(0,200,83,0.2); border-radius: 4px; display: flex; flex-direction: column; gap: 0.75rem; padding: 0.875rem; }
   .discovery-label { color: #00c853; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; margin: 0; }
   .dashboard-section { margin-bottom: 2rem; }
-  /* Experiment card list & filter */
-  .filter-bar { display: flex; gap: 0.375rem; flex-wrap: wrap; margin-bottom: 1rem; }
-  .filter-btn { background: none; border: 1px solid #1e2d4a; border-radius: 3px; color: #4a5d82; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.06em; padding: 0.2rem 0.625rem; text-transform: uppercase; transition: all 0.15s; }
-  .filter-btn.active { border-color: #00d4ff; color: #00d4ff; background: rgba(0,212,255,0.08); }
-  .filter-btn:hover:not(.active) { border-color: #3d7fff; color: #8fa3cc; }
-  .exp-card-list { display: flex; flex-direction: column; gap: 0.625rem; }
-  .exp-card { background: rgba(13,21,40,0.6); border: 1px solid #1e2d4a; border-radius: 6px; cursor: pointer; display: block; padding: 0.875rem 1.125rem; text-align: left; transition: border-color 0.15s, background 0.15s; width: 100%; }
-  .exp-card:hover { background: rgba(61,127,255,0.06); border-color: #3d7fff; }
-  .exp-card-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
-  .exp-card-title { color: #e8eeff; font-size: 0.95rem; font-weight: 600; }
-  .exp-card-badges { display: flex; gap: 0.375rem; flex-wrap: wrap; }
-  .exp-card-meta { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-  .meta-chip { background: rgba(61,127,255,0.08); border-radius: 3px; color: #8fa3cc; font-size: 0.72rem; padding: 0.15rem 0.5rem; }
+  /* card/filter styles moved to WorkspaceList component */
 </style>

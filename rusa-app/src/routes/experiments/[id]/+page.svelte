@@ -4,6 +4,7 @@
   import PageShell from '$lib/components/PageShell.svelte';
   import Modal from '$lib/components/Modal.svelte';
   import Field from '$lib/components/Field.svelte';
+  import WorkspaceDetail from '$lib/components/WorkspaceDetail.svelte';
   import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
   import { canPerform } from '$lib/stores/permissions';
@@ -49,6 +50,30 @@
     experiment?.status === 'conclusion_requested' &&
     (isChemistryExp ? isObserver : isTaskmaster)
   );
+  const workspaceTags = $derived([
+    ...(experiment?.experiment_type ? [{ label: `🔬 ${experiment.experiment_type}`, className: 'tag-type' }] : []),
+    { label: experiment?.status ?? '—', className: `badge ${expStatusBadgeClass(experiment?.status)}` },
+    ...(experiment?.conclusion_approved ? [{ label: 'Concluded', className: 'badge badge-done' }] : []),
+    ...(experiment?.start_date ? [{ label: `📅 ${new Date(experiment.start_date).toLocaleDateString()}`, className: 'tag-date' }] : []),
+  ]);
+  const workspaceActions = $derived([
+    ...(canReviewExperiment && (experiment?.status === 'pending' || experiment?.status === 'approved')
+      ? [{ label: 'Review', className: 'btn-secondary', onClick: () => { reviewStatus = ''; reviewNotes = ''; reviewOpen = true; } }]
+      : []),
+    ...(isObserver && !isChemistryExp
+      ? [{ label: 'Assign Task', className: 'btn-observer', onClick: () => { assignTaskAssignee = null; assignTaskTitle = ''; assignTaskDue = ''; assignTaskOpen = true; } }]
+      : []),
+    ...(canRequestConclusion
+      ? [{ label: 'Request Conclusion', className: 'btn-conclude', onClick: () => openConclusionRequest() }]
+      : []),
+    ...(canReviewConclusion
+      ? [{ label: 'Review Conclusion', className: 'btn-conclude', onClick: () => openConclusionReview() }]
+      : []),
+  ]);
+  const workspaceTabs = $derived([
+    { key: 'overview', label: 'Overview' },
+    { key: 'activity_logs', label: 'Activity Logs', count: logs.length },
+  ]);
 
   // Review modal
   let reviewOpen = $state(false);
@@ -351,49 +376,17 @@
   {:else if !experiment}
     <p class="empty">Experiment not found.</p>
   {:else}
-    <!-- Workspace Header -->
-    <div class="workspace-header">
-      <div class="header-top">
-        <button class="btn-back" onclick={() => goto(backPath)}>← Back</button>
-        <div class="header-actions">
-          {#if canReviewExperiment && (experiment.status === 'pending' || experiment.status === 'approved')}
-            <button class="btn-secondary" onclick={() => { reviewStatus = ''; reviewNotes = ''; reviewOpen = true; }}>Review</button>
-          {/if}
-          {#if isObserver && !isChemistryExp}
-            <button class="btn-observer" onclick={() => { assignTaskAssignee = null; assignTaskTitle = ''; assignTaskDue = ''; assignTaskOpen = true; }}>Assign Task</button>
-          {/if}
-          {#if canRequestConclusion}
-            <button class="btn-conclude" onclick={openConclusionRequest}>Request Conclusion</button>
-          {/if}
-          {#if canReviewConclusion}
-            <button class="btn-conclude" onclick={openConclusionReview}>Review Conclusion</button>
-          {/if}
-        </div>
-      </div>
-      <div class="header-meta">
-        {#if experiment.experiment_type}
-          <span class="meta-tag tag-type">🔬 {experiment.experiment_type}</span>
-        {/if}
-        <span class="badge {expStatusBadgeClass(experiment.status)}">{experiment.status ?? '—'}</span>
-        {#if experiment.conclusion_approved}
-          <span class="badge badge-done">Concluded</span>
-        {/if}
-        {#if experiment.start_date}
-          <span class="meta-tag tag-date">📅 {new Date(experiment.start_date).toLocaleDateString()}</span>
-        {/if}
-      </div>
-    </div>
-
-    <!-- Internal Tabs -->
-    <div class="tabs">
-      <button class="tab" class:active={activeTab === 'overview'} onclick={() => activeTab = 'overview'}>Overview</button>
-      <button class="tab" class:active={activeTab === 'activity_logs'} onclick={() => activeTab = 'activity_logs'}>
-        Activity Logs
-        {#if logs.length > 0}<span class="tab-count">{logs.length}</span>{/if}
-      </button>
-    </div>
-
-    {#if activeTab === 'overview'}
+    <WorkspaceDetail
+      backLabel="Back"
+      onBack={() => goto(backPath)}
+      tags={workspaceTags}
+      actions={workspaceActions}
+      tabs={workspaceTabs}
+      activeTab={activeTab}
+      onSelectTab={(t) => activeTab = t as DetailTab}
+    >
+      {#snippet body()}
+        {#if activeTab === 'overview'}
       <div class="overview-grid">
         {#if experiment.description}
           <div class="detail-card full-width">
@@ -464,7 +457,7 @@
         {/if}
       </div>
 
-    {:else if activeTab === 'activity_logs'}
+        {:else if activeTab === 'activity_logs'}
       <div class="section-bar">
         <h2 class="section-title">Activity Logs</h2>
         {#if canAddLog}
@@ -499,7 +492,9 @@
           {/each}
         </div>
       {/if}
-    {/if}
+        {/if}
+      {/snippet}
+    </WorkspaceDetail>
   {/if}
 </PageShell>
 
@@ -713,47 +708,6 @@
 </Modal>
 
 <style>
-  .workspace-header {
-    background: rgba(61,127,255,0.04);
-    border: 1px solid #1e2d4a;
-    border-radius: 6px;
-    margin-bottom: 1.5rem;
-    padding: 1rem 1.25rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-  .header-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-  }
-  .header-actions {
-    display: flex;
-    gap: 0.625rem;
-    flex-wrap: wrap;
-  }
-  .header-meta {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-  }
-  .btn-back {
-    background: none;
-    border: 1px solid #1e2d4a;
-    border-radius: 4px;
-    color: #8fa3cc;
-    cursor: pointer;
-    font-family: 'Space Mono', monospace;
-    font-size: 0.7rem;
-    letter-spacing: 0.05em;
-    padding: 0.4rem 0.875rem;
-    transition: all 0.15s;
-  }
-  .btn-back:hover { border-color: #3d7fff; color: #3d7fff; }
   .meta-tag {
     border-radius: 3px;
     font-family: 'Space Mono', monospace;
@@ -764,10 +718,7 @@
   }
   .tag-type { background: rgba(61,127,255,0.1); color: #8fa3cc; }
   .tag-date { background: rgba(0,212,255,0.08); color: #8fa3cc; }
-  .tabs { display: flex; gap: 0; border-bottom: 1px solid #1e2d4a; margin-bottom: 1.5rem; flex-wrap: wrap; }
-  .tab { background: none; border: none; border-bottom: 2px solid transparent; color: #8fa3cc; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; padding: 0.75rem 1.25rem; text-transform: uppercase; transition: all 0.15s; }
-  .tab.active { color: #00d4ff; border-bottom-color: #00d4ff; }
-  .tab-count { background: #1e2d4a; border-radius: 10px; color: #8fa3cc; font-size: 0.6rem; font-weight: 700; margin-left: 5px; padding: 1px 6px; }
+  /* header + tabs styles moved to WorkspaceDetail component */
   .overview-grid { display: flex; flex-direction: column; gap: 1rem; }
   .detail-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 0.75rem; }
   .detail-card { background: rgba(13,21,40,0.6); border: 1px solid #1e2d4a; border-radius: 4px; padding: 0.75rem 1rem; }
