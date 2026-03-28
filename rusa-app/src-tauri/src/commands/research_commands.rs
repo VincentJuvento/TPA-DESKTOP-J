@@ -13,8 +13,8 @@ struct ExperimentRow {
     proposed_by: Option<Uuid>,
     reviewed_by: Option<Uuid>,
     review_notes: Option<String>,
-    start_date: Option<chrono::DateTime<chrono::Utc>>,
-    end_date: Option<chrono::DateTime<chrono::Utc>>,
+    start_date: Option<chrono::NaiveDate>,
+    end_date: Option<chrono::NaiveDate>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
     conclusion_requested_at: Option<chrono::DateTime<chrono::Utc>>,
     conclusion_requested_by: Option<Uuid>,
@@ -259,7 +259,7 @@ pub async fn propose_test(
     let session = validate_session_command(&token).await?;
 
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO test_proposals (title, description, methodology, status, proposed_by) VALUES ($1,$2,$3,'pending',$4) RETURNING id"
+        "INSERT INTO test_proposals (title, description, methodology, proposed_by) VALUES ($1,$2,$3,$4) RETURNING id"
     )
     .bind(&title).bind(&description).bind(&methodology).bind(session.user_id)
     .fetch_one(db::get_db())
@@ -284,14 +284,18 @@ pub async fn review_test_proposal(
     }
 
     let pid = Uuid::parse_str(&proposal_id).map_err(|_| "Invalid proposal ID".to_string())?;
+    let normalized_status = status.trim().to_lowercase();
+    if normalized_status != "approved" && normalized_status != "rejected" {
+        return Err("Test proposal status must be 'approved' or 'rejected'".to_string());
+    }
 
     sqlx::query("UPDATE test_proposals SET status = $1, reviewed_by = $2, review_notes = $3 WHERE id = $4 AND deleted_at IS NULL")
-        .bind(&status).bind(session.user_id).bind(&notes).bind(pid)
+        .bind(&normalized_status).bind(session.user_id).bind(&notes).bind(pid)
         .execute(db::get_db())
         .await
         .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "REVIEW_TEST_PROPOSAL", Some("test_proposals"), Some(pid), None, Some(serde_json::json!({ "status": status }))).await;
+    let _ = write_audit_log(Some(session.user_id), "REVIEW_TEST_PROPOSAL", Some("test_proposals"), Some(pid), None, Some(serde_json::json!({ "status": normalized_status }))).await;
     Ok(())
 }
 
@@ -534,9 +538,9 @@ pub async fn get_observer_dashboard(token: String) -> Result<serde_json::Value, 
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let now = chrono::Utc::now();
+    let today = chrono::Utc::now().date_naive();
     let experiments_json: Vec<serde_json::Value> = experiments.into_iter().map(|e| {
-        let days_elapsed = e.start_date.map(|s| (now - s).num_days()).unwrap_or(0);
+        let days_elapsed = e.start_date.map(|s| (today - s).num_days()).unwrap_or(0);
         let mut v = serde_json::to_value(&e).unwrap_or_default();
         if let Some(obj) = v.as_object_mut() {
             obj.insert("days_elapsed".to_string(), serde_json::json!(days_elapsed));

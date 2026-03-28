@@ -231,6 +231,10 @@
   async function submitReview() {
     const s = $session; if (!s || !reviewTarget) return;
     if (!reviewStatus) { showToast('Status required', 'error'); return; }
+    if (reviewType === 'test' && reviewStatus !== 'approved' && reviewStatus !== 'rejected') {
+      showToast('Test proposals can only be approved or rejected', 'error');
+      return;
+    }
     try {
       if (reviewType === 'experiment') {
         await researchApi.reviewExperiment(s.token, reviewTarget.id, reviewStatus, reviewNotes || undefined);
@@ -589,7 +593,7 @@
   const reviewStatusOpts = [
     { value: 'approved', label: 'Approved' },
     { value: 'rejected', label: 'Rejected' },
-    { value: 'under_review', label: 'Under Review' },
+    { value: 'in_progress', label: 'Approve & Start' },
   ];
   const helpResolveOpts = [
     { value: 'in_review', label: 'In Review' },
@@ -1017,7 +1021,16 @@
 
 <Modal bind:open={reviewOpen} title="Review {reviewTarget?.title}">
   <div class="form">
-    <Field label="Status" type="select" bind:value={reviewStatus} options={reviewStatusOpts} required />
+    <Field label="Status" type="select" bind:value={reviewStatus} options={reviewType === 'test'
+      ? [
+          { value: '', label: '— Select —' },
+          { value: 'approved', label: 'Approve' },
+          { value: 'rejected', label: 'Reject' }
+        ]
+      : [
+          { value: '', label: '— Select —' },
+          ...reviewStatusOpts
+        ]} required />
     <Field label="Notes" type="textarea" bind:value={reviewNotes} />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => reviewOpen = false}>Cancel</button>

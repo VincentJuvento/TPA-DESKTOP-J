@@ -211,6 +211,10 @@
   async function submitReview() {
     const s = $session; if (!s || !reviewTarget) return;
     if (!reviewStatus) { showToast('Status required', 'error'); return; }
+    if (reviewType === 'test' && reviewStatus !== 'approved' && reviewStatus !== 'rejected') {
+      showToast('Test proposals can only be approved or rejected', 'error');
+      return;
+    }
     try {
       if (reviewType === 'experiment') {
         await researchApi.reviewExperiment(s.token, reviewTarget.id, reviewStatus, reviewNotes || undefined);
@@ -743,7 +747,7 @@
     <Field label="Decision" type="select" bind:value={reviewStatus} options={[
       { value: '', label: '— Select —' },
       { value: 'approved', label: 'Approve' },
-      { value: 'in_progress', label: 'Approve & Start' },
+      ...(reviewType === 'experiment' ? [{ value: 'in_progress', label: 'Approve & Start' }] : []),
       { value: 'rejected', label: 'Reject' },
     ]} required />
     <Field label="Notes (optional)" type="textarea" bind:value={reviewNotes} rows={3} />

@@ -92,14 +92,14 @@ export const dataApi = {
     invoke<string>('submit_data_request', {
       token,
       title: payload.title,
-      requested_data_items: payload.requestedDataItems,
-      reason_of_request: payload.reasonOfRequest,
+      requestedDataItems: payload.requestedDataItems,
+      reasonOfRequest: payload.reasonOfRequest,
       description: payload.description,
-      data_type: payload.dataType,
-      requester_location: payload.requesterLocation,
-      requester_tel_fax: payload.requesterTelFax,
-      requester_department: payload.requesterDepartment,
-      requester_department_email: payload.requesterDepartmentEmail
+      dataType: payload.dataType,
+      requesterLocation: payload.requesterLocation,
+      requesterTelFax: payload.requesterTelFax,
+      requesterDepartment: payload.requesterDepartment,
+      requesterDepartmentEmail: payload.requesterDepartmentEmail
     }),
   getRequests: (token: string) => invoke<any[]>('get_data_requests', { token }),
   review: (token: string, requestId: string, status: string, notes?: string, assignedTo?: string) =>
