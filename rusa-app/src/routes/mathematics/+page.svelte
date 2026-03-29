@@ -737,10 +737,6 @@
 <Modal bind:open={helpDeliverOpen} title="Deliver Response">
   <div class="form">
     <Field label="Response" type="textarea" bind:value={helpDeliverResponse} rows={4} required />
-    <!-- Help Deliver Modal -->
-<Modal bind:open={helpDeliverOpen} title="Deliver Response">
-  <div class="form">
-    <Field label="Response" type="textarea" bind:value={helpDeliverResponse} rows={4} required />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => helpDeliverOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={submitHelpDeliver}>Deliver</button>
