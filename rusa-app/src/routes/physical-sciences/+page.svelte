@@ -266,9 +266,9 @@
   });
 </script>
 
-<svelte:head><title>RUSA IMS — Chemistry</title></svelte:head>
+<svelte:head><title>RUSA IMS — Physical Sciences</title></svelte:head>
 
-<PageShell title="Chemistry" subtitle="Matter archive, new matter experiments, test archive, and help requests">
+<PageShell title="Physical Sciences" subtitle="Matter archive, new matter experiments, test archive, and help requests">
   <div class="tabs">
     <button class="tab" class:active={activeTab==='matter_archive'} onclick={() => activeTab='matter_archive'}>Matter Archive</button>
     <button class="tab" class:active={activeTab==='experiments'} onclick={() => activeTab='experiments'}>
@@ -369,7 +369,7 @@
             `By: ${getUserName(exp.proposed_by)}`
           ]}
           getBadges={(exp) => exp.conclusion_approved ? [{ label: 'Concluded', className: 'badge-done' }] : []}
-          emptyMessage="No chemistry experiments yet."
+          emptyMessage="No Physical Sciences experiments yet."
           emptyFilteredMessage="No experiments match the selected filter."
         />
       {/snippet}
@@ -428,7 +428,7 @@
       <button class="btn-primary" onclick={() => testOpen = true}>+ Propose Test</button>
     </div>
     <p class="access-note">
-      📋 Chemists may propose new standardised tests to The Observer if a required procedure is not in the archive. Proposals can be approved or rejected.
+      📋 Chemists and physicists may propose new standardised tests to The Observer if a required procedure is not in the archive. Proposals can be approved or rejected.
     </p>
     {#if tests.length === 0}
       <p class="empty">No tests in the archive yet.</p>
@@ -500,7 +500,7 @@
 
   {:else if activeTab === 'observer_dashboard' && isObserver}
     <div class="section-bar">
-      <h2 class="section-title">Observer Dashboard — Chemistry</h2>
+      <h2 class="section-title">Observer Dashboard — Physical Sciences</h2>
       <button class="btn-secondary" onclick={loadChemDashboard}>↻ Refresh</button>
     </div>
     {#if chemDashboardLoading}

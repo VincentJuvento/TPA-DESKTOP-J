@@ -25,7 +25,6 @@
   let expOpen = $state(false);
   let expTitle = $state('');
   let expDesc = $state('');
-  let expType = $state('');
   let expStart = $state('');
   let expEnd = $state('');
 
@@ -162,6 +161,7 @@
         researchTaskApi.getTasks(s.token),
         aerospaceApi.getHelpRequests(s.token),
       ]);
+      experiments = experiments.filter((e: any) => e.experiment_type === 'new_species');
       allUsers = await userApi.getAll(s.token);
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
     loading = false;
@@ -169,12 +169,13 @@
 
   async function proposeExperiment() {
     const s = $session; if (!s) return;
-    if (!expTitle || !expDesc || !expType) { showToast('Title, description, and type required', 'error'); return; }
+    if (!expTitle || !expDesc) { showToast('Title and description required', 'error'); return; }
     try {
-      await researchApi.proposeExperiment(s.token, expTitle, expDesc, expType, expStart ? expStart + 'T00:00:00Z' : undefined, expEnd ? expEnd + 'T00:00:00Z' : undefined);
+      await researchApi.proposeExperiment(s.token, expTitle, expDesc, 'new_species', expStart ? expStart + 'T00:00:00Z' : undefined, expEnd ? expEnd + 'T00:00:00Z' : undefined);
       showToast('Experiment proposed', 'success');
-      expOpen = false; expTitle = ''; expDesc = ''; expType = ''; expStart = ''; expEnd = '';
-      experiments = await researchApi.getExperiments(s.token);
+      expOpen = false; expTitle = ''; expDesc = ''; expStart = ''; expEnd = '';
+      const all = await researchApi.getExperiments(s.token);
+      experiments = all.filter((e: any) => e.experiment_type === 'new_species');
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
@@ -413,9 +414,9 @@
   const isDirector = $derived(($session?.tier ?? 0) >= 3);
 </script>
 
-<svelte:head><title>RUSA IMS — Research & Lab</title></svelte:head>
+<svelte:head><title>RUSA IMS — Life Sciences</title></svelte:head>
 
-<PageShell title="Research & Lab" subtitle="Experiments, species archive, test proposals, and research tasks">
+<PageShell title="Life Sciences" subtitle="New species experiments, species archive, test proposals, and research tasks">
   <div class="tabs">
     <button class="tab" class:active={activeTab==='experiments'} onclick={() => activeTab='experiments'}>Experiments</button>
     <button class="tab" class:active={activeTab==='species'} onclick={() => activeTab='species'}>Species Archive</button>
@@ -759,7 +760,6 @@
   <div class="form">
     <Field label="Title" bind:value={expTitle} required />
     <Field label="Description" type="textarea" bind:value={expDesc} required />
-    <Field label="Experiment Type" bind:value={expType} placeholder="e.g. biology, chemistry" required />
     <Field label="Start Date" type="date" bind:value={expStart} />
     <Field label="End Date" type="date" bind:value={expEnd} />
     <div class="form-actions">
