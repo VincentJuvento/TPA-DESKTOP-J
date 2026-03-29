@@ -38,8 +38,8 @@ export const researchApi = {
     invoke<string>('propose_experiment', { token, title, description, experimentType, startDate, endDate }),
   reviewExperiment: (token: string, experimentId: string, status: string, notes?: string) =>
     invoke<void>('review_experiment', { token, experimentId, status, notes }),
-  addLog: (token: string, experimentId: string, logDate: string, personnelPresent?: string, speciesMatterTested?: string, testsPerformed?: string, linkedTestIds?: string, notes?: string) =>
-    invoke<string>('add_experiment_log', { token, experimentId, logDate, personnelPresent, speciesMatterTested, testsPerformed, linkedTestIds, notes }),
+  addLog: (token: string, experimentId: string, logDate: string, personnelPresent?: string, speciesMatterTested?: string, testsPerformed?: string, linkedTestIds?: string, notes?: string, testOutcome?: string, personnelIds?: string, attachments?: string) =>
+    invoke<string>('add_experiment_log', { token, experimentId, logDate, personnelPresent, speciesMatterTested, testsPerformed, linkedTestIds, notes, testOutcome, personnelIds, attachments }),
   getExperimentLogs: (token: string, experimentId: string) =>
     invoke<any[]>('get_experiment_logs', { token, experimentId }),
   requestConclusion: (token: string, experimentId: string, finalNotes: string, finalFindings?: string, methodologySummary?: string, keyResults?: string, recommendations?: string, limitations?: string) =>
@@ -69,8 +69,8 @@ export const researchApi = {
 // Chemistry Department
 export const chemistryApi = {
   getMatterArchive: (token: string) => invoke<any[]>('get_matter_archive', { token }),
-  addChemistryLog: (token: string, experimentId: string, logDate: string, linkedTestId: string, matterTested?: string, personnelPresent?: string, notes?: string) =>
-    invoke<string>('add_chemistry_log', { token, experimentId, logDate, linkedTestId, matterTested, personnelPresent, notes }),
+  addChemistryLog: (token: string, experimentId: string, logDate: string, linkedTestId: string, testOutcome: string, personnelIds?: string, attachments?: string, notes?: string) =>
+    invoke<string>('add_chemistry_log', { token, experimentId, logDate, linkedTestId, testOutcome, personnelIds, attachments, notes }),
   approveChemistryConclusion: (token: string, experimentId: string, decision: string, matterName: string, matterClassification?: string, matterType?: string, matterProperties?: string, reviewNotes?: string) =>
     invoke<void>('approve_chemistry_conclusion', { token, experimentId, decision, matterName, matterClassification, matterType, matterProperties, reviewNotes }),
   getChemistryObserverDashboard: (token: string) => invoke<any>('get_chemistry_observer_dashboard', { token }),

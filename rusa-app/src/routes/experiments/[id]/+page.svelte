@@ -118,8 +118,10 @@
   let logNewSpeciesHabitat = $state('');
   let logNewSpeciesDesc = $state('');
   // Chemistry-only log fields
-  let chemLogMatter = $state('');
   let chemLogLinkedTestId = $state('');
+  let logTestOutcome = $state('');
+  let logPersonnelIds: string[] = $state([]);
+  let logAttachmentFiles: File[] = $state([]);
 
   // Conclusion Request modal
   let conclusionReqOpen = $state(false);
@@ -235,7 +237,7 @@
     logSpecies = ''; logTestsText = ''; logLinkedTestIds = [];
     logNewSpecies = false; logNewSpeciesName = ''; logNewSpeciesClass = '';
     logNewSpeciesHabitat = ''; logNewSpeciesDesc = '';
-    chemLogMatter = ''; chemLogLinkedTestId = '';
+    chemLogLinkedTestId = ''; logTestOutcome = ''; logPersonnelIds = []; logAttachmentFiles = [];
     logOpen = true;
   }
 
@@ -247,6 +249,16 @@
     }
   }
 
+  function formatTestOutcome(outcome: string): string {
+    return outcome.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  function buildAttachmentsJson(): string | undefined {
+    if (logAttachmentFiles.length === 0) return undefined;
+    const ts = new Date().toISOString();
+    return JSON.stringify(logAttachmentFiles.map(f => ({ name: f.name, size: f.size, upload_timestamp: ts })));
+  }
+
   async function submitLog() {
     const s = $session; if (!s || !experiment) return;
     if (!logDate) { showToast('Log date is required', 'error'); return; }
@@ -254,11 +266,14 @@
       const dateVal = logDate.includes('T')
         ? new Date(logDate).toISOString()
         : new Date(logDate + 'T00:00:00Z').toISOString();
+      const personnelJson = logPersonnelIds.length > 0 ? JSON.stringify(logPersonnelIds) : undefined;
+      const attachmentsJson = buildAttachmentsJson();
       if (isChemistryExp) {
         if (!chemLogLinkedTestId) { showToast('A linked test is required for chemistry logs', 'error'); return; }
+        if (!logTestOutcome) { showToast('Test Outcome is required for chemistry logs', 'error'); return; }
         await chemistryApi.addChemistryLog(
           s.token, experiment.id, dateVal, chemLogLinkedTestId,
-          chemLogMatter || undefined, logPersonnel || undefined, logNotes || undefined,
+          logTestOutcome, personnelJson, attachmentsJson, logNotes || undefined,
         );
       } else {
         const linkedJson = logLinkedTestIds.length > 0 ? JSON.stringify(logLinkedTestIds) : undefined;
@@ -266,6 +281,7 @@
           s.token, experiment.id, dateVal,
           logPersonnel || undefined, logSpecies || undefined,
           logTestsText || undefined, linkedJson, logNotes || undefined,
+          logTestOutcome || undefined, personnelJson, attachmentsJson,
         );
         if (logNewSpecies && logNewSpeciesName.trim()) {
           try {
@@ -481,12 +497,21 @@
               {:else if log.tests_performed}
                 <p class="log-field"><strong>Tests:</strong> {log.tests_performed}</p>
               {/if}
+              {#if log.test_outcome}
+                <p class="log-field"><strong>Outcome:</strong> <span class="test-linked">{formatTestOutcome(log.test_outcome)}</span></p>
+              {/if}
               {#if log.species_matter_tested}
                 <p class="log-field"><strong>Subject:</strong> {log.species_matter_tested}</p>
               {/if}
               {#if log.notes}<p class="log-field">{log.notes}</p>{/if}
               {#if log.new_species_proposed}
                 <p class="log-field discovery-badge">🔬 New species proposed to archive</p>
+              {/if}
+              {#if log.attachments}
+                {@const atts = (() => { try { return JSON.parse(log.attachments); } catch { return []; } })()}
+                {#if atts.length > 0}
+                  <p class="log-field"><strong>📎 Attachments:</strong> {atts.map((a: any) => a.name).join(', ')}</p>
+                {/if}
               {/if}
             </div>
           {/each}
@@ -534,6 +559,10 @@
   <div class="form">
     {#if isChemistryExp}
       <p class="access-note">⚠️ Each log entry must reference an approved test from the Test Archive.</p>
+      <div class="field">
+        <label class="field-label">Matter Being Tested</label>
+        <div class="readonly-block">{experiment?.title ?? '—'}{#if experiment?.description} — {experiment.description.slice(0, 120)}{experiment.description.length > 120 ? '…' : ''}{/if}</div>
+      </div>
     {/if}
     <Field label="Log Date" type="datetime-local" bind:value={logDate} required />
     {#if isChemistryExp}
@@ -549,7 +578,16 @@
           <p class="access-note" style="margin-top:0.25rem">No approved tests available. Propose a test first.</p>
         {/if}
       </div>
-      <Field label="Matter Being Tested / Observed" bind:value={chemLogMatter} placeholder="e.g. Unknown mineral sample #4" />
+      <div class="field">
+        <label class="field-label">Test Outcome (required) *</label>
+        <select class="field-input" bind:value={logTestOutcome}>
+          <option value="">— Select outcome —</option>
+          <option value="successful">Successful</option>
+          <option value="inconclusive">Inconclusive</option>
+          <option value="failed">Failed</option>
+          <option value="equipment_malfunction">Equipment Malfunction</option>
+        </select>
+      </div>
     {:else}
       <div class="field">
         <span class="field-label">Tests Performed (select from approved tests)</span>
@@ -570,8 +608,41 @@
       </div>
       <Field label="Species / Matter Tested" bind:value={logSpecies} placeholder="What was tested today" />
     {/if}
-    <Field label="Personnel Present (optional)" bind:value={logPersonnel} />
+    <div class="field">
+      <label class="field-label">Personnel Present</label>
+      <div class="personnel-multi">
+        {#each allUsers as u}
+          <label class="test-check-item">
+            <input type="checkbox" checked={logPersonnelIds.includes(u.id)}
+              onchange={() => {
+                if (logPersonnelIds.includes(u.id)) {
+                  logPersonnelIds = logPersonnelIds.filter(id => id !== u.id);
+                } else {
+                  logPersonnelIds = [...logPersonnelIds, u.id];
+                }
+              }} />
+            <span class="test-check-label">{u.full_name ?? u.username}</span>
+            {#if u.role_name}<span class="test-check-meta">{u.role_name}</span>{/if}
+          </label>
+        {/each}
+        {#if allUsers.length === 0}
+          <p class="info-text">No registered users found.</p>
+        {/if}
+      </div>
+    </div>
     <Field label="Notes / Progress" type="textarea" bind:value={logNotes} rows={3} />
+    <div class="field">
+      <label class="field-label">Attachments / Raw Data</label>
+      <input class="field-input" type="file" multiple
+        onchange={(e) => { const input = e.target as HTMLInputElement; logAttachmentFiles = input.files ? Array.from(input.files) : []; }} />
+      {#if logAttachmentFiles.length > 0}
+        <ul class="attachment-list">
+          {#each logAttachmentFiles as f}
+            <li class="attachment-item">{f.name} <span class="test-check-meta">({(f.size / 1024).toFixed(1)} KB)</span></li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
 
     {#if !isChemistryExp}
       <div class="field">
@@ -776,4 +847,7 @@
   .discovery-toggle { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
   .discovery-form { background: rgba(0,200,83,0.05); border: 1px solid rgba(0,200,83,0.2); border-radius: 4px; display: flex; flex-direction: column; gap: 0.75rem; padding: 0.875rem; }
   .discovery-label { color: #00c853; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; margin: 0; }
+  .personnel-multi { border: 1px solid #1e2d4a; border-radius: 4px; max-height: 160px; overflow-y: auto; padding: 0.375rem; display: flex; flex-direction: column; gap: 0.25rem; }
+  .attachment-list { list-style: none; margin: 0.25rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+  .attachment-item { color: #c8d8f0; font-size: 0.82rem; padding: 0.2rem 0.375rem; background: rgba(61,127,255,0.05); border-radius: 3px; }
 </style>
