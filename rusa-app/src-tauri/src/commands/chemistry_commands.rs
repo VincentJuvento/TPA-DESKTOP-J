@@ -57,9 +57,10 @@ pub async fn add_chemistry_log(
     token: String,
     experiment_id: String,
     log_date: String,
-    matter_tested: Option<String>,
-    personnel_present: Option<String>,
     linked_test_id: String,
+    test_outcome: String,
+    personnel_ids: Option<String>,
+    attachments: Option<String>,
     notes: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
@@ -68,6 +69,16 @@ pub async fn add_chemistry_log(
         return Err(
             "A linked test from the Test Archive is required for every chemistry log entry".to_string(),
         );
+    }
+
+    // Validate test_outcome is one of the allowed values.
+    match test_outcome.as_str() {
+        "successful" | "inconclusive" | "failed" | "equipment_malfunction" => {}
+        _ => {
+            return Err(
+                "test_outcome must be one of: successful, inconclusive, failed, equipment_malfunction".to_string(),
+            );
+        }
     }
 
     // Validate the linked_test_id is a valid UUID and the test is approved.
@@ -118,17 +129,39 @@ pub async fn add_chemistry_log(
     let linked_json =
         serde_json::to_string(&vec![linked_test_id.trim()]).unwrap_or_default();
 
+    // Parse and validate personnel_ids JSON array if provided.
+    let personnel_ids_val: Option<serde_json::Value> = if let Some(ref p) = personnel_ids {
+        let v: serde_json::Value = serde_json::from_str(p)
+            .map_err(|_| "personnel_ids must be a valid JSON array".to_string())?;
+        if !v.is_array() {
+            return Err("personnel_ids must be a JSON array".to_string());
+        }
+        Some(v)
+    } else {
+        None
+    };
+
+    // Parse attachments JSON array if provided.
+    let attachments_val: Option<serde_json::Value> = if let Some(ref a) = attachments {
+        let v: serde_json::Value = serde_json::from_str(a)
+            .map_err(|_| "attachments must be valid JSON".to_string())?;
+        Some(v)
+    } else {
+        None
+    };
+
     let row: (Uuid,) = sqlx::query_as(
         "INSERT INTO experiment_logs \
-         (experiment_id, log_date, personnel_present, species_matter_tested, \
-          linked_test_ids, notes, logged_by) \
-         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id",
+         (experiment_id, log_date, linked_test_ids, test_outcome, \
+          personnel_ids, attachments, notes, logged_by) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
     )
     .bind(eid)
     .bind(ldate)
-    .bind(&personnel_present)
-    .bind(&matter_tested)
     .bind(&linked_json)
+    .bind(&test_outcome)
+    .bind(&personnel_ids_val)
+    .bind(&attachments_val)
     .bind(&notes)
     .bind(session.user_id)
     .fetch_one(db::get_db())
@@ -141,7 +174,7 @@ pub async fn add_chemistry_log(
         Some("experiment_logs"),
         Some(row.0),
         None,
-        Some(serde_json::json!({ "experiment_id": experiment_id, "linked_test_id": linked_test_id })),
+        Some(serde_json::json!({ "experiment_id": experiment_id, "linked_test_id": linked_test_id, "test_outcome": test_outcome })),
     )
     .await;
 

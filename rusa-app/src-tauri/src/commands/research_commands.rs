@@ -167,6 +167,9 @@ pub async fn add_experiment_log(
     tests_performed: Option<String>,
     linked_test_ids: Option<String>,
     notes: Option<String>,
+    test_outcome: Option<String>,
+    personnel_ids: Option<String>,
+    attachments: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
     let eid = Uuid::parse_str(&experiment_id).map_err(|_| "Invalid experiment ID".to_string())?;
@@ -174,11 +177,36 @@ pub async fn add_experiment_log(
         .map(|d| d.with_timezone(&chrono::Utc))
         .map_err(|_| "Invalid log_date format".to_string())?;
 
+    // Parse and validate personnel_ids JSON array if provided.
+    let personnel_ids_val: Option<serde_json::Value> = if let Some(ref p) = personnel_ids {
+        let v: serde_json::Value = serde_json::from_str(p)
+            .map_err(|_| "personnel_ids must be a valid JSON array".to_string())?;
+        if !v.is_array() {
+            return Err("personnel_ids must be a JSON array".to_string());
+        }
+        Some(v)
+    } else {
+        None
+    };
+
+    // Parse attachments JSON array if provided.
+    let attachments_val: Option<serde_json::Value> = if let Some(ref a) = attachments {
+        let v: serde_json::Value = serde_json::from_str(a)
+            .map_err(|_| "attachments must be valid JSON".to_string())?;
+        Some(v)
+    } else {
+        None
+    };
+
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO experiment_logs (experiment_id, log_date, personnel_present, species_matter_tested, tests_performed, linked_test_ids, notes, logged_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id"
+        "INSERT INTO experiment_logs \
+         (experiment_id, log_date, personnel_present, species_matter_tested, tests_performed, \
+          linked_test_ids, notes, logged_by, test_outcome, personnel_ids, attachments) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id"
     )
     .bind(eid).bind(ldate).bind(&personnel_present).bind(&species_matter_tested)
     .bind(&tests_performed).bind(&linked_test_ids).bind(&notes).bind(session.user_id)
+    .bind(&test_outcome).bind(&personnel_ids_val).bind(&attachments_val)
     .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
