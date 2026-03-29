@@ -326,6 +326,9 @@ pub fn run() {
             commands::research_task_commands::get_research_tasks,
             commands::research_task_commands::submit_research_task_result,
             commands::research_task_commands::complete_research_task,
+            commands::research_task_commands::update_research_task_status,
+            commands::research_task_commands::request_research_task_conclusion,
+            commands::research_task_commands::review_research_task_conclusion,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

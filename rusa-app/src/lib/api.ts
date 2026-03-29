@@ -460,6 +460,12 @@ export const researchTaskApi = {
     invoke<void>('submit_research_task_result', { token, taskId, resultNotes }),
   complete: (token: string, taskId: string) =>
     invoke<void>('complete_research_task', { token, taskId }),
+  updateStatus: (token: string, taskId: string, status: string, progressNotes?: string) =>
+    invoke<void>('update_research_task_status', { token, taskId, status, progressNotes }),
+  requestConclusion: (token: string, taskId: string, finalNotes: string, finalFindings?: string, methodologySummary?: string, keyResults?: string, recommendations?: string, limitations?: string) =>
+    invoke<void>('request_research_task_conclusion', { token, taskId, finalNotes, finalFindings, methodologySummary, keyResults, recommendations, limitations }),
+  reviewConclusion: (token: string, taskId: string, decision: string, reviewNotes?: string) =>
+    invoke<void>('review_research_task_conclusion', { token, taskId, decision, reviewNotes }),
 };
 
 // Types
