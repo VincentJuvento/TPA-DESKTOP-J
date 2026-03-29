@@ -24,7 +24,6 @@
     { path: '/chemistry', label: 'Chemistry', icon: '🧪', roles: ['chemist', 'physicist', 'the_observer'] },
     { path: '/theoretical', label: 'Theoretical Sciences', icon: '∑', roles: ['mathematician', 'the_artificer', 'the_taskmaster'] },
     { path: '/data-services', label: 'Data Services', icon: '◈' },
-    { path: '/data-request', label: 'Request Data', icon: '◇' },
     { path: '/security', label: 'Security', icon: '⚔', roles: ['earth_security_head', 'earth_security_staff', 'galactic_security_head', 'galactic_security_staff', 'the_guardian', 'the_overseer'] },
     { path: '/communications', label: 'Communications', icon: '📡', roles: ['the_anchorman', 'the_guardian', 'the_overseer'] },
     { path: '/astronautics', label: 'Astronautics', icon: '🚀', roles: ['astronaut', 'the_wanderer', 'the_taskmaster'] },
