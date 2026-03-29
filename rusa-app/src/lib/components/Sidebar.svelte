@@ -20,8 +20,8 @@
   const navItems: NavItem[] = [
     { path: '/dashboard', label: 'Dashboard', icon: '⌂' },
     { path: '/messages', label: 'Messages', icon: '✉' },
-    { path: '/research', label: 'Research & Lab', icon: '⚗', roles: ['biologist', 'biological_engineer', 'agricultural_engineer', 'the_observer', 'the_taskmaster'] },
-    { path: '/chemistry', label: 'Chemistry', icon: '🧪', roles: ['chemist', 'physicist', 'the_observer'] },
+    { path: '/life-sciences', label: 'Life Sciences', icon: '⚗', roles: ['biologist', 'biological_engineer', 'agricultural_engineer', 'the_observer'] },
+    { path: '/physical-sciences', label: 'Physical Sciences', icon: '🧪', roles: ['chemist', 'physicist', 'the_artificer', 'the_observer'] },
     { path: '/theoretical', label: 'Theoretical Sciences', icon: '∑', roles: ['mathematician', 'the_artificer', 'the_taskmaster'] },
     { path: '/data-services', label: 'Data Services', icon: '◈' },
     { path: '/data-request', label: 'Request Data', icon: '◇' },
