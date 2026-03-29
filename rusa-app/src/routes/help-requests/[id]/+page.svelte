@@ -20,8 +20,22 @@
   let activeTab = $state<'overview' | 'activity'>('overview');
 
   const isObserver = $derived(canPerform($session, 'the_observer'));
-  const roleHint = $derived($session?.role_name === 'chemist' || $session?.role_name === 'physicist' ? 'chemistry' : 'research');
-  const backPath = $derived(roleHint === 'chemistry' ? '/chemistry' : '/research');
+  const isArtificer = $derived(canPerform($session, 'the_artificer'));
+  const isStatistician = $derived(canPerform($session, 'the_statistician'));
+  // isDirector: any proxy director that can act on help requests
+  const isDirector = $derived(isObserver || isArtificer || isStatistician);
+
+  // Determine which domain page to navigate back to based on the requester's role.
+  const backPath = $derived.by(() => {
+    const role = $session?.role_name;
+    if (role === 'chemist') return '/chemistry';
+    if (role === 'physicist') return '/physical-sciences';
+    if (role === 'mathematician') return '/mathematics';
+    if (role === 'aerospace_engineer') return '/aerospace';
+    if (role === 'biological_engineer' || role === 'agricultural_engineer') return '/life-sciences';
+    // Directors navigating back go to research by default
+    return '/research';
+  });
 
   let helpResolveOpen = $state(false);
   let helpResolveStatus = $state('in_review');
@@ -74,14 +88,14 @@
   ]);
 
   const workspaceActions = $derived([
-    ...(isObserver && (request?.status === 'open' || request?.status === 'in_review')
+    ...(isDirector && (request?.status === 'open' || request?.status === 'in_review')
       ? [
           { label: 'Mark Review', className: 'btn-secondary', onClick: () => { helpResolveStatus = 'in_review'; helpResolveResponse = ''; helpResolveOpen = true; } },
           { label: 'Approve', className: 'btn-primary', onClick: () => { helpApproveAssignee = null; helpApproveOpen = true; } },
           { label: 'Reject', className: 'btn-danger', onClick: () => { helpRejectReason = ''; helpRejectOpen = true; } },
         ]
       : []),
-    ...(isObserver && request?.status === 'converted'
+    ...(isDirector && request?.status === 'converted'
       ? [{ label: 'Deliver Response', className: 'btn-observer', onClick: () => { helpDeliverResponse = ''; helpDeliverOpen = true; } }]
       : []),
   ]);
