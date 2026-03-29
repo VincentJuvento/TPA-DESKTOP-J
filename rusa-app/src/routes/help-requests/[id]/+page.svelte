@@ -10,6 +10,7 @@
   import { canPerform } from '$lib/stores/permissions';
   import { aerospaceApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
+  import LinkedTaskCard from '$lib/components/LinkedTaskCard.svelte';
   import { onMount } from 'svelte';
 
   const reqId = $derived($page.params.id);
@@ -146,7 +147,17 @@
             {#if request.created_task_id}
               <div class="detail-card full-width">
                 <h3 class="detail-label">Linked Task</h3>
-                <p class="detail-value"><code>{request.created_task_id}</code></p>
+                {#if request.linked_task_title}
+                  <LinkedTaskCard
+                    taskTitle={request.linked_task_title}
+                    taskAssignedTo={request.linked_task_assigned_to}
+                    taskStatus={request.linked_task_status}
+                    taskType={request.linked_task_type}
+                    {allUsers}
+                  />
+                {:else}
+                  <p class="detail-value">Task ID: {request.created_task_id}</p>
+                {/if}
               </div>
             {/if}
             {#if !request.response && !request.rejection_reason && !request.created_task_id}
