@@ -1,4 +1,4 @@
-use crate::auth::{is_admin, permissions, require_role_name, validate_session_command};
+use crate::auth::{deny_galactic_security, is_admin, permissions, require_role_name, validate_session_command};
 use crate::queries::auth::write_audit_log;
 use crate::queries::security as security_queries;
 use tauri::Emitter;
@@ -70,6 +70,7 @@ pub async fn add_lost_found_item(
     found_date: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
+    deny_galactic_security(&session)?;
     require_role_name(&session, "earth_security_head")?;
 
     let fdate = found_date.as_deref()
@@ -91,7 +92,8 @@ pub async fn add_lost_found_item(
 
 #[tauri::command]
 pub async fn get_lost_found(token: String) -> Result<Vec<serde_json::Value>, String> {
-    let _session = validate_session_command(&token).await?;
+    let session = validate_session_command(&token).await?;
+    deny_galactic_security(&session)?;
 
     let rows = security_queries::get_all_lost_found()
         .await
@@ -103,6 +105,7 @@ pub async fn get_lost_found(token: String) -> Result<Vec<serde_json::Value>, Str
 #[tauri::command]
 pub async fn claim_lost_found(token: String, item_id: String) -> Result<(), String> {
     let session = validate_session_command(&token).await?;
+    deny_galactic_security(&session)?;
     let iid = Uuid::parse_str(&item_id).map_err(|_| "Invalid item ID".to_string())?;
 
     security_queries::claim_lost_found_item(iid, session.user_id)
