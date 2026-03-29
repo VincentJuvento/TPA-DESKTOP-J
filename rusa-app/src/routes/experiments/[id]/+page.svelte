@@ -249,6 +249,16 @@
     }
   }
 
+  function formatTestOutcome(outcome: string): string {
+    return outcome.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  function buildAttachmentsJson(): string | undefined {
+    if (logAttachmentFiles.length === 0) return undefined;
+    const ts = new Date().toISOString();
+    return JSON.stringify(logAttachmentFiles.map(f => ({ name: f.name, size: f.size, upload_timestamp: ts })));
+  }
+
   async function submitLog() {
     const s = $session; if (!s || !experiment) return;
     if (!logDate) { showToast('Log date is required', 'error'); return; }
@@ -256,23 +266,17 @@
       const dateVal = logDate.includes('T')
         ? new Date(logDate).toISOString()
         : new Date(logDate + 'T00:00:00Z').toISOString();
+      const personnelJson = logPersonnelIds.length > 0 ? JSON.stringify(logPersonnelIds) : undefined;
+      const attachmentsJson = buildAttachmentsJson();
       if (isChemistryExp) {
         if (!chemLogLinkedTestId) { showToast('A linked test is required for chemistry logs', 'error'); return; }
         if (!logTestOutcome) { showToast('Test Outcome is required for chemistry logs', 'error'); return; }
-        const personnelJson = logPersonnelIds.length > 0 ? JSON.stringify(logPersonnelIds) : undefined;
-        const attachmentsJson = logAttachmentFiles.length > 0
-          ? JSON.stringify(logAttachmentFiles.map(f => ({ name: f.name, size: f.size, upload_timestamp: new Date().toISOString() })))
-          : undefined;
         await chemistryApi.addChemistryLog(
           s.token, experiment.id, dateVal, chemLogLinkedTestId,
           logTestOutcome, personnelJson, attachmentsJson, logNotes || undefined,
         );
       } else {
         const linkedJson = logLinkedTestIds.length > 0 ? JSON.stringify(logLinkedTestIds) : undefined;
-        const personnelJson = logPersonnelIds.length > 0 ? JSON.stringify(logPersonnelIds) : undefined;
-        const attachmentsJson = logAttachmentFiles.length > 0
-          ? JSON.stringify(logAttachmentFiles.map(f => ({ name: f.name, size: f.size, upload_timestamp: new Date().toISOString() })))
-          : undefined;
         await researchApi.addLog(
           s.token, experiment.id, dateVal,
           logPersonnel || undefined, logSpecies || undefined,
@@ -494,7 +498,7 @@
                 <p class="log-field"><strong>Tests:</strong> {log.tests_performed}</p>
               {/if}
               {#if log.test_outcome}
-                <p class="log-field"><strong>Outcome:</strong> <span class="test-linked">{log.test_outcome.replace(/_/g, ' ')}</span></p>
+                <p class="log-field"><strong>Outcome:</strong> <span class="test-linked">{formatTestOutcome(log.test_outcome)}</span></p>
               {/if}
               {#if log.species_matter_tested}
                 <p class="log-field"><strong>Subject:</strong> {log.species_matter_tested}</p>
