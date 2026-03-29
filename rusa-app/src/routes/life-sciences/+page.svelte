@@ -7,12 +7,12 @@
   import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
   import { canPerform } from '$lib/stores/permissions';
-  import { researchApi, researchTaskApi, userApi, aerospaceApi } from '$lib/api';
+  import { researchApi, researchTaskApi, userApi, aerospaceApi, researchSecurityApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
 
-  type Tab = 'experiments' | 'species' | 'tests' | 'research_tasks' | 'pending_conclusions' | 'observer_dashboard' | 'help_requests';
+  type Tab = 'experiments' | 'species' | 'tests' | 'research_tasks' | 'pending_conclusions' | 'observer_dashboard' | 'help_requests' | 'security_reports';
   let activeTab = $state<Tab>('experiments');
 
   let experiments: any[] = $state([]);
@@ -141,6 +141,18 @@
     helpStatusFilter === 'all'
       ? helpRequests
       : helpRequests.filter((r: any) => r.status === helpStatusFilter)
+  );
+
+  // Security reports
+  let securityReports: any[] = $state([]);
+  let secReportOpen = $state(false);
+  let secTitle = $state('');
+  let secCategory = $state('Equipment Damage');
+  let secDesc = $state('');
+  let secSeverity = $state('low');
+  let secReportFilter = $state('all');
+  const filteredSecurityReports = $derived(
+    secReportFilter === 'all' ? securityReports : securityReports.filter((r: any) => r.status === secReportFilter)
   );
 
   function getUserName(userId: string | undefined | null): string {

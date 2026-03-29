@@ -168,6 +168,16 @@ export const securityApi = {
   getExternalReports: (token: string) => invoke<any[]>('get_external_reports', { token }),
 };
 
+export const researchSecurityApi = {
+  submitReport: (token: string, title: string, category: string, description: string, severity: string, relatedExperimentId?: string, relatedTaskId?: string, attachments?: any) =>
+    invoke<string>('submit_security_report', { token, title, category, description, severity, relatedExperimentId, relatedTaskId, attachments }),
+  getReports: (token: string) => invoke<any[]>('get_security_reports', { token }),
+  acknowledgeReport: (token: string, reportId: string, notes?: string) =>
+    invoke<void>('acknowledge_security_report', { token, reportId, notes }),
+  updateReportStatus: (token: string, reportId: string, status: string, notes?: string) =>
+    invoke<void>('update_security_report_status', { token, reportId, status, notes }),
+};
+
 // Astronautics
 export const astronautApi = {
   getMissions: (token: string) => invoke<any[]>('get_missions', { token }),
