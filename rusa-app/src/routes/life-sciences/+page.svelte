@@ -481,6 +481,34 @@
     { value: 'fungus', label: 'Fungus' },
     { value: 'other', label: 'Other' },
   ];
+  const secCategoryOpts = [
+    { value: 'Equipment Damage', label: 'Equipment Damage' },
+    { value: 'Safety Violation', label: 'Safety Violation' },
+    { value: 'Unauthorized Access', label: 'Unauthorized Access' },
+    { value: 'Data Breach', label: 'Data Breach' },
+    { value: 'Other', label: 'Other' },
+  ];
+  const secSeverityOpts = [
+    { value: 'low', label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
+    { value: 'critical', label: 'Critical' },
+  ];
+  const secStatusFilterOpts = [
+    { value: 'all', label: 'All' },
+    { value: 'new', label: 'New' },
+    { value: 'acknowledged', label: 'Acknowledged' },
+    { value: 'investigating', label: 'Investigating' },
+    { value: 'resolved', label: 'Resolved' },
+    { value: 'closed', label: 'Closed' },
+  ];
+  const secSeverityFilterOpts = [
+    { value: 'all', label: 'All' },
+    { value: 'low', label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
+    { value: 'critical', label: 'Critical' },
+  ];
   const isDirector = $derived(($session?.tier ?? 0) >= 3);
 </script>
 
@@ -836,27 +864,8 @@
     <p class="access-note">🔒 Reports are routed directly to security staff. Researchers can only view reports they submitted.</p>
     <div class="table-wrap" style="margin-bottom:0.75rem;">
       <div class="form" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.75rem;">
-        <div class="field">
-          <label class="field-label">Status Filter</label>
-          <select class="field-input" bind:value={secReportFilter}>
-            <option value="all">All</option>
-            <option value="new">New</option>
-            <option value="acknowledged">Acknowledged</option>
-            <option value="investigating">Investigating</option>
-            <option value="resolved">Resolved</option>
-            <option value="closed">Closed</option>
-          </select>
-        </div>
-        <div class="field">
-          <label class="field-label">Severity Filter</label>
-          <select class="field-input" bind:value={secSeverityFilter}>
-            <option value="all">All</option>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-            <option value="critical">Critical</option>
-          </select>
-        </div>
+        <Field label="Status Filter" type="select" bind:value={secReportFilter} options={secStatusFilterOpts} />
+        <Field label="Severity Filter" type="select" bind:value={secSeverityFilter} options={secSeverityFilterOpts} />
       </div>
     </div>
     {#if visibleSecurityReports.length === 0}
@@ -1067,30 +1076,13 @@
 <Modal bind:open={secReportOpen} title="Submit Security Report">
   <div class="form">
     <Field label="Title" bind:value={secTitle} required />
-    <div class="field">
-      <label class="field-label">Category</label>
-      <select class="field-input" bind:value={secCategory}>
-        <option value="Equipment Damage">Equipment Damage</option>
-        <option value="Safety Violation">Safety Violation</option>
-        <option value="Unauthorized Access">Unauthorized Access</option>
-        <option value="Data Breach">Data Breach</option>
-        <option value="Other">Other</option>
-      </select>
-    </div>
+    <Field label="Category" type="select" bind:value={secCategory} options={secCategoryOpts} />
     <Field label="Description" type="textarea" bind:value={secDesc} rows={4} required />
-    <div class="field">
-      <label class="field-label">Severity</label>
-      <select class="field-input" bind:value={secSeverity}>
-        <option value="low">Low</option>
-        <option value="medium">Medium</option>
-        <option value="high">High</option>
-        <option value="critical">Critical</option>
-      </select>
-    </div>
+    <Field label="Severity" type="select" bind:value={secSeverity} options={secSeverityOpts} />
     <Field label="Related Experiment ID (optional)" bind:value={secRelatedExperimentId} />
     <Field label="Related Task ID (optional)" bind:value={secRelatedTaskId} />
     <div class="field">
-      <label class="field-label">Attachments (optional)</label>
+      <span class="field-label">Attachments (optional)</span>
       <input
         class="field-input"
         type="file"
