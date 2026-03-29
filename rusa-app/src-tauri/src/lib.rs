@@ -155,7 +155,11 @@ pub fn run() {
             commands::security_commands::get_security_findings,
             commands::security_commands::assign_security_task,
             commands::security_commands::get_security_tasks,
+            commands::security_commands::get_security_task,
             commands::security_commands::update_security_task_status,
+            commands::security_commands::append_security_task_activity_log,
+            commands::security_commands::request_security_task_conclusion,
+            commands::security_commands::review_security_task_conclusion,
             commands::security_commands::submit_external_report,
             commands::security_commands::get_external_reports,
             commands::security_commands::submit_security_report,
@@ -251,7 +255,11 @@ pub fn run() {
             commands::psychiatry_commands::get_recovery_log,
             commands::psychiatry_commands::assign_psychiatry_task,
             commands::psychiatry_commands::get_psychiatry_tasks,
+            commands::psychiatry_commands::get_psychiatry_task,
             commands::psychiatry_commands::update_psychiatry_task_status,
+            commands::psychiatry_commands::append_psychiatry_task_activity_log,
+            commands::psychiatry_commands::request_psychiatry_task_conclusion,
+            commands::psychiatry_commands::review_psychiatry_task_conclusion,
             // medical
             commands::medical_commands::allocate_shift,
             commands::medical_commands::get_shifts,
@@ -265,11 +273,19 @@ pub fn run() {
             commands::medical_commands::submit_expenditure_report,
             commands::medical_commands::assign_medical_task,
             commands::medical_commands::get_medical_tasks,
+            commands::medical_commands::get_medical_task,
             commands::medical_commands::update_medical_task_status,
+            commands::medical_commands::append_medical_task_activity_log,
+            commands::medical_commands::request_medical_task_conclusion,
+            commands::medical_commands::review_medical_task_conclusion,
             // sanitary
             commands::sanitary_commands::get_sanitary_tasks,
+            commands::sanitary_commands::get_sanitary_task,
             commands::sanitary_commands::assign_sanitary_task,
             commands::sanitary_commands::update_sanitary_task,
+            commands::sanitary_commands::append_sanitary_task_activity_log,
+            commands::sanitary_commands::request_sanitary_task_conclusion,
+            commands::sanitary_commands::review_sanitary_task_conclusion,
             commands::sanitary_commands::get_sanitary_inventory,
             commands::sanitary_commands::update_sanitary_inventory,
             commands::sanitary_commands::add_disposal_log,
@@ -337,4 +353,3 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-

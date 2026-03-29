@@ -7,6 +7,7 @@ use uuid::Uuid;
 #[tauri::command]
 pub async fn get_sanitary_tasks(token: String) -> Result<Vec<serde_json::Value>, AppError> {
     let session = validate_session_command(&token).await?;
+    sanitary_queries::ensure_sanitary_task_columns().await?;
 
     let rows = if permissions::has_permission(&session.role_name, "head_of_sanitary") {
         sanitary_queries::get_all_sanitary_tasks().await
@@ -28,6 +29,7 @@ pub async fn assign_sanitary_task(
 ) -> Result<String, AppError> {
     let session = validate_session_command(&token).await?;
     require_role_name(&session, "head_of_sanitary")?;
+    sanitary_queries::ensure_sanitary_task_columns().await?;
 
     let atid = Uuid::parse_str(&assigned_to).map_err(|_| "Invalid user ID")?;
     let ddate = due_date.as_deref()
@@ -55,11 +57,115 @@ pub async fn update_sanitary_task(
 ) -> Result<(), AppError> {
     let session = validate_session_command(&token).await?;
     let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID")?;
+    sanitary_queries::ensure_sanitary_task_columns().await?;
 
-    sanitary_queries::update_sanitary_task_status(tid, &status, session.user_id, &session.role_name)
+    let task = sanitary_queries::get_sanitary_task_by_id(tid, session.user_id).await?;
+    let task = task.ok_or("Task not found or access denied")?;
+    let is_assigner = task.assigned_by.map(|id| id == session.user_id).unwrap_or(false);
+    let is_head = permissions::has_permission(&session.role_name, "head_of_sanitary");
+
+    if !is_assigner && !is_head && status == "completed" {
+        return Err(AppError::from("Only the task assigner can mark a task as completed"));
+    }
+    if !is_assigner && !is_head && task.status.as_deref() == Some("conclusion_requested") {
+        return Err(AppError::from("Status cannot be changed while awaiting assigner review"));
+    }
+
+    sanitary_queries::update_sanitary_task_status(tid, &status, session.user_id, &session.full_name, &session.role_name)
         .await?;
 
     let _ = write_audit_log(Some(session.user_id), "UPDATE_SANITARY_TASK", Some("sanitary_tasks"), Some(tid), None, Some(serde_json::json!({ "status": status }))).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_sanitary_task(token: String, task_id: String) -> Result<serde_json::Value, AppError> {
+    let session = validate_session_command(&token).await?;
+    sanitary_queries::ensure_sanitary_task_columns().await?;
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID")?;
+
+    let row = sanitary_queries::get_sanitary_task_by_id(tid, session.user_id).await?;
+    row.map(|r| serde_json::to_value(r).unwrap_or_default())
+        .ok_or_else(|| AppError::from("Task not found"))
+}
+
+#[tauri::command]
+pub async fn append_sanitary_task_activity_log(
+    token: String,
+    task_id: String,
+    content: String,
+) -> Result<(), AppError> {
+    let session = validate_session_command(&token).await?;
+    sanitary_queries::ensure_sanitary_task_columns().await?;
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID")?;
+
+    let task = sanitary_queries::get_sanitary_task_by_id(tid, session.user_id).await?;
+    if task.is_none() {
+        return Err(AppError::from("Task not found or access denied"));
+    }
+
+    sanitary_queries::append_sanitary_task_log(tid, session.user_id, &session.full_name, &content).await?;
+    let _ = write_audit_log(Some(session.user_id), "APPEND_SANITARY_TASK_LOG", Some("sanitary_tasks"), Some(tid), None, None).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn request_sanitary_task_conclusion(
+    token: String,
+    task_id: String,
+    notes: String,
+) -> Result<(), AppError> {
+    let session = validate_session_command(&token).await?;
+    sanitary_queries::ensure_sanitary_task_columns().await?;
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID")?;
+
+    if notes.trim().is_empty() {
+        return Err(AppError::from("Conclusion notes are required"));
+    }
+
+    let task = sanitary_queries::get_sanitary_task_by_id(tid, session.user_id).await?;
+    let task = task.ok_or("Task not found or access denied")?;
+    if task.assigned_to != Some(session.user_id) {
+        return Err(AppError::from("Only assigned subordinate can request conclusion"));
+    }
+    let current = task.status.as_deref().unwrap_or("pending");
+    if current == "conclusion_requested" || current == "completed" {
+        return Err(AppError::from("Task is already in conclusion or completed state"));
+    }
+
+    sanitary_queries::request_sanitary_task_conclusion(tid, session.user_id, &session.full_name, &notes).await?;
+    let _ = write_audit_log(Some(session.user_id), "REQUEST_SANITARY_TASK_CONCLUSION", Some("sanitary_tasks"), Some(tid), None, None).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn review_sanitary_task_conclusion(
+    token: String,
+    task_id: String,
+    decision: String,
+    review_notes: Option<String>,
+) -> Result<(), AppError> {
+    let session = validate_session_command(&token).await?;
+    sanitary_queries::ensure_sanitary_task_columns().await?;
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID")?;
+
+    let task = sanitary_queries::get_sanitary_task_by_id(tid, session.user_id).await?;
+    let task = task.ok_or("Task not found or access denied")?;
+    if task.assigned_by != Some(session.user_id) {
+        return Err(AppError::from("Only assigner can review conclusion"));
+    }
+    if task.status.as_deref() != Some("conclusion_requested") {
+        return Err(AppError::from("Task is not awaiting conclusion review"));
+    }
+
+    let approve = match decision.as_str() {
+        "approve" => true,
+        "reject" => false,
+        _ => return Err(AppError::from("Invalid decision. Use 'approve' or 'reject'")),
+    };
+
+    sanitary_queries::review_sanitary_task_conclusion(tid, session.user_id, &session.full_name, approve, review_notes.as_deref()).await?;
+    let _ = write_audit_log(Some(session.user_id), "REVIEW_SANITARY_TASK_CONCLUSION", Some("sanitary_tasks"), Some(tid), None, Some(serde_json::json!({ "decision": decision }))).await;
     Ok(())
 }
 

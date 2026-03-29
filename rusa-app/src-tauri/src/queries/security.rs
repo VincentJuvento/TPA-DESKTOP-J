@@ -485,7 +485,6 @@ pub async fn request_security_task_conclusion(task_id: Uuid, user_id: Uuid, full
 }
 
 pub async fn review_security_task_conclusion(task_id: Uuid, user_id: Uuid, full_name: &str, approve: bool, review_notes: Option<&str>) -> Result<(), sqlx::Error> {
-    let new_status = if approve { "completed" } else { "in_progress" };
     let log_type = if approve { "conclusion_approved" } else { "conclusion_rejected" };
     let log_entry = serde_json::json!([{
         "timestamp": chrono::Utc::now().to_rfc3339(),
