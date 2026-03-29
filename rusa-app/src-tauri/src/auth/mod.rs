@@ -75,6 +75,20 @@ pub fn require_permission(session: &SessionData, required_role: &str) -> Result<
     require_role_name(session, required_role)
 }
 
+/// Rejects galactic security roles from accessing Earth-only features such as
+/// the lost &amp; found archive ("if something is lost in space, it stays lost").
+pub fn deny_galactic_security(session: &SessionData) -> Result<(), String> {
+    if session.role_name == "galactic_security_head"
+        || session.role_name == "galactic_security_staff"
+    {
+        return Err(
+            "Galactic Security does not maintain a lost & found system; if something is lost in space, it stays lost."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 /// Returns `true` if the session belongs to `the_administrator` (tier 4).
 pub fn is_admin(session: &SessionData) -> bool {
     session.role_name == "the_administrator" || session.tier >= 4
