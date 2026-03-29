@@ -439,6 +439,24 @@ pub async fn get_security_tasks(token: String) -> Result<Vec<serde_json::Value>,
 }
 
 #[tauri::command]
+pub async fn get_security_task(token: String, task_id: String) -> Result<serde_json::Value, String> {
+    let session = validate_session_command(&token).await?;
+
+    security_queries::ensure_security_tasks_table()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
+
+    let row = security_queries::get_security_task_by_id(tid, session.user_id)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    row.map(|r| serde_json::to_value(r).unwrap_or_default())
+        .ok_or_else(|| "Task not found".to_string())
+}
+
+#[tauri::command]
 pub async fn update_security_task_status(
     token: String,
     task_id: String,
@@ -452,7 +470,35 @@ pub async fn update_security_task_status(
 
     let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
 
-    security_queries::update_security_task_status(tid, &status)
+    // Fetch task to check authorization and current status
+    let task: Option<(Option<Uuid>, Option<Uuid>, String)> = sqlx::query_as(
+        "SELECT assigned_to, assigned_by, status FROM security_tasks WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(tid)
+    .fetch_optional(crate::db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let (assigned_to, assigned_by, current_status) = task.ok_or_else(|| "Task not found".to_string())?;
+
+    let is_assigner = assigned_by.map(|id| id == session.user_id).unwrap_or(false);
+    let is_head = is_admin(&session)
+        || permissions::has_permission(&session.role_name, "the_guardian")
+        || permissions::has_permission(&session.role_name, "the_overseer");
+
+    if !is_assigner && !is_head && assigned_to.map(|id| id != session.user_id).unwrap_or(true) {
+        return Err("You do not have permission to update this task".to_string());
+    }
+
+    if !is_assigner && !is_head && status == "completed" {
+        return Err("Only the task assigner can mark a task as completed".to_string());
+    }
+
+    if !is_assigner && !is_head && current_status == "conclusion_requested" {
+        return Err("Status cannot be changed while awaiting assigner review".to_string());
+    }
+
+    security_queries::update_security_task_status(tid, &status, session.user_id, &session.full_name)
         .await
         .map_err(|e| format!("DB error: {}", e))?;
 
@@ -466,6 +512,132 @@ pub async fn update_security_task_status(
     )
     .await;
 
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn append_security_task_activity_log(
+    token: String,
+    task_id: String,
+    content: String,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+
+    security_queries::ensure_security_tasks_table()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
+
+    let task: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT status FROM security_tasks WHERE id = $1 AND (assigned_to = $2 OR assigned_by = $2) AND deleted_at IS NULL",
+    )
+    .bind(tid)
+    .bind(session.user_id)
+    .fetch_optional(crate::db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    if task.is_none() {
+        return Err("Task not found or access denied".to_string());
+    }
+
+    security_queries::append_security_task_log(tid, session.user_id, &session.full_name, &content)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "APPEND_SECURITY_TASK_LOG", Some("security_tasks"), Some(tid), None, None).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn request_security_task_conclusion(
+    token: String,
+    task_id: String,
+    notes: String,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+
+    security_queries::ensure_security_tasks_table()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    if notes.trim().is_empty() {
+        return Err("Conclusion notes are required".to_string());
+    }
+
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
+
+    let task: Option<(String,)> = sqlx::query_as(
+        "SELECT status FROM security_tasks WHERE id = $1 AND assigned_to = $2 AND deleted_at IS NULL",
+    )
+    .bind(tid)
+    .bind(session.user_id)
+    .fetch_optional(crate::db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    match task {
+        None => return Err("Task not found or not assigned to you".to_string()),
+        Some((s,)) => {
+            if s == "conclusion_requested" || s == "completed" {
+                return Err("Task is already in conclusion or completed state".to_string());
+            }
+        }
+    }
+
+    security_queries::request_security_task_conclusion(tid, session.user_id, &session.full_name, &notes)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "REQUEST_SECURITY_TASK_CONCLUSION", Some("security_tasks"), Some(tid), None, None).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn review_security_task_conclusion(
+    token: String,
+    task_id: String,
+    decision: String,
+    review_notes: Option<String>,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+
+    security_queries::ensure_security_tasks_table()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
+
+    let task: Option<(String,)> = sqlx::query_as(
+        "SELECT status FROM security_tasks WHERE id = $1 AND assigned_by = $2 AND deleted_at IS NULL",
+    )
+    .bind(tid)
+    .bind(session.user_id)
+    .fetch_optional(crate::db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    match &task {
+        None => return Err("Task not found or you are not the assigner".to_string()),
+        Some((s,)) => {
+            if s != "conclusion_requested" {
+                return Err("Task is not awaiting conclusion review".to_string());
+            }
+        }
+    }
+
+    let approve = match decision.as_str() {
+        "approve" => true,
+        "reject" => false,
+        _ => return Err("Invalid decision. Use 'approve' or 'reject'".to_string()),
+    };
+
+    security_queries::review_security_task_conclusion(tid, session.user_id, &session.full_name, approve, review_notes.as_deref())
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "REVIEW_SECURITY_TASK_CONCLUSION", Some("security_tasks"), Some(tid), None, Some(serde_json::json!({ "decision": decision }))).await;
     Ok(())
 }
 
