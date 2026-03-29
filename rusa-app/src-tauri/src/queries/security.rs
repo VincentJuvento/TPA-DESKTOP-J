@@ -443,3 +443,119 @@ pub async fn get_external_reports_by_submitter(submitted_by: Uuid) -> Result<Vec
     .fetch_all(get_db())
     .await
 }
+
+// ─── Security Reports (Research Department) ──────────────────────────────────
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub struct SecurityReportRow {
+    pub id: Uuid,
+    pub submitted_by: Uuid,
+    pub submitted_at: chrono::DateTime<chrono::Utc>,
+    pub title: String,
+    pub category: String,
+    pub description: String,
+    pub severity: String,
+    pub related_experiment_id: Option<Uuid>,
+    pub related_task_id: Option<Uuid>,
+    pub status: String,
+    pub security_staff_notes: Option<String>,
+    pub resolved_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub attachments: Option<serde_json::Value>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn insert_security_report(
+    submitted_by: Uuid,
+    title: &str,
+    category: &str,
+    description: &str,
+    severity: &str,
+    related_experiment_id: Option<Uuid>,
+    related_task_id: Option<Uuid>,
+    attachments: Option<serde_json::Value>,
+) -> Result<Uuid, sqlx::Error> {
+    let row: (Uuid,) = sqlx::query_as(
+        r#"INSERT INTO security_reports
+            (submitted_by, title, category, description, severity, related_experiment_id, related_task_id, attachments)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           RETURNING id"#,
+    )
+    .bind(submitted_by)
+    .bind(title)
+    .bind(category)
+    .bind(description)
+    .bind(severity)
+    .bind(related_experiment_id)
+    .bind(related_task_id)
+    .bind(attachments)
+    .fetch_one(get_db())
+    .await?;
+    Ok(row.0)
+}
+
+pub async fn get_security_reports_by_submitter(submitted_by: Uuid) -> Result<Vec<SecurityReportRow>, sqlx::Error> {
+    sqlx::query_as::<_, SecurityReportRow>(
+        r#"SELECT id, submitted_by, submitted_at, title, category, description, severity,
+                  related_experiment_id, related_task_id, status, security_staff_notes,
+                  resolved_at, attachments, created_at
+           FROM security_reports
+           WHERE submitted_by = $1 AND deleted_at IS NULL
+           ORDER BY created_at DESC"#,
+    )
+    .bind(submitted_by)
+    .fetch_all(get_db())
+    .await
+}
+
+pub async fn get_all_security_reports() -> Result<Vec<SecurityReportRow>, sqlx::Error> {
+    sqlx::query_as::<_, SecurityReportRow>(
+        r#"SELECT id, submitted_by, submitted_at, title, category, description, severity,
+                  related_experiment_id, related_task_id, status, security_staff_notes,
+                  resolved_at, attachments, created_at
+           FROM security_reports
+           WHERE deleted_at IS NULL
+           ORDER BY created_at DESC"#,
+    )
+    .fetch_all(get_db())
+    .await
+}
+
+pub async fn acknowledge_security_report(
+    report_id: Uuid,
+    notes: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE security_reports SET status = 'acknowledged', security_staff_notes = COALESCE($1, security_staff_notes) WHERE id = $2 AND deleted_at IS NULL",
+    )
+    .bind(notes)
+    .bind(report_id)
+    .execute(get_db())
+    .await?;
+    Ok(())
+}
+
+pub async fn update_security_report_status(
+    report_id: Uuid,
+    status: &str,
+    notes: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    let resolved_at: Option<chrono::DateTime<chrono::Utc>> = if status == "resolved" || status == "closed" {
+        Some(chrono::Utc::now())
+    } else {
+        None
+    };
+    sqlx::query(
+        r#"UPDATE security_reports
+           SET status = $1,
+               security_staff_notes = COALESCE($2, security_staff_notes),
+               resolved_at = CASE WHEN $3 THEN NOW() ELSE resolved_at END
+           WHERE id = $4 AND deleted_at IS NULL"#,
+    )
+    .bind(status)
+    .bind(notes)
+    .bind(resolved_at.is_some())
+    .bind(report_id)
+    .execute(get_db())
+    .await?;
+    Ok(())
+}

@@ -507,3 +507,143 @@ pub async fn get_external_reports(token: String) -> Result<Vec<serde_json::Value
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
+
+// ─── Security Reports (Research Department) ──────────────────────────────────
+
+#[tauri::command]
+pub async fn submit_security_report(
+    token: String,
+    title: String,
+    category: String,
+    description: String,
+    severity: String,
+    related_experiment_id: Option<String>,
+    related_task_id: Option<String>,
+    attachments: Option<serde_json::Value>,
+) -> Result<String, String> {
+    let session = validate_session_command(&token).await?;
+
+    let exp_id = related_experiment_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| Uuid::parse_str(s).map_err(|_| "Invalid experiment ID".to_string()))
+        .transpose()?;
+    let task_id = related_task_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| Uuid::parse_str(s).map_err(|_| "Invalid task ID".to_string()))
+        .transpose()?;
+
+    let id = security_queries::insert_security_report(
+        session.user_id,
+        &title,
+        &category,
+        &description,
+        &severity,
+        exp_id,
+        task_id,
+        attachments,
+    )
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "SUBMIT_SECURITY_REPORT",
+        Some("security_reports"),
+        Some(id),
+        None,
+        Some(serde_json::json!({ "title": title, "severity": severity, "category": category })),
+    )
+    .await;
+
+    Ok(id.to_string())
+}
+
+#[tauri::command]
+pub async fn get_security_reports(token: String) -> Result<Vec<serde_json::Value>, String> {
+    let session = validate_session_command(&token).await?;
+
+    let security_roles = [
+        "the_guardian", "the_overseer",
+        "earth_security_head", "earth_security_staff",
+        "galactic_security_head", "galactic_security_staff",
+    ];
+    let rows = if security_roles.contains(&session.role_name.as_str()) || is_admin(&session) {
+        security_queries::get_all_security_reports().await
+    } else {
+        security_queries::get_security_reports_by_submitter(session.user_id).await
+    }
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
+}
+
+#[tauri::command]
+pub async fn acknowledge_security_report(
+    token: String,
+    report_id: String,
+    notes: Option<String>,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    let security_roles = [
+        "the_guardian", "the_overseer",
+        "earth_security_head", "earth_security_staff",
+        "galactic_security_head", "galactic_security_staff",
+    ];
+    if !security_roles.contains(&session.role_name.as_str()) && !is_admin(&session) {
+        return Err("Only security staff can acknowledge reports".to_string());
+    }
+
+    let rid = Uuid::parse_str(&report_id).map_err(|_| "Invalid report ID".to_string())?;
+    security_queries::acknowledge_security_report(rid, notes.as_deref())
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "ACKNOWLEDGE_SECURITY_REPORT",
+        Some("security_reports"),
+        Some(rid),
+        None,
+        Some(serde_json::json!({ "notes": notes })),
+    )
+    .await;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn update_security_report_status(
+    token: String,
+    report_id: String,
+    status: String,
+    notes: Option<String>,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    let security_roles = [
+        "the_guardian", "the_overseer",
+        "earth_security_head", "earth_security_staff",
+        "galactic_security_head", "galactic_security_staff",
+    ];
+    if !security_roles.contains(&session.role_name.as_str()) && !is_admin(&session) {
+        return Err("Only security staff can update report status".to_string());
+    }
+
+    let rid = Uuid::parse_str(&report_id).map_err(|_| "Invalid report ID".to_string())?;
+    security_queries::update_security_report_status(rid, &status, notes.as_deref())
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "UPDATE_SECURITY_REPORT_STATUS",
+        Some("security_reports"),
+        Some(rid),
+        None,
+        Some(serde_json::json!({ "status": status, "notes": notes })),
+    )
+    .await;
+
+    Ok(())
+}

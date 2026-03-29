@@ -7,12 +7,12 @@
   import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
   import { canPerform } from '$lib/stores/permissions';
-  import { researchApi, researchTaskApi, userApi, aerospaceApi } from '$lib/api';
+  import { researchApi, researchTaskApi, userApi, aerospaceApi, researchSecurityApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
 
-  type Tab = 'experiments' | 'species' | 'tests' | 'research_tasks' | 'pending_conclusions' | 'observer_dashboard' | 'help_requests';
+  type Tab = 'experiments' | 'species' | 'tests' | 'research_tasks' | 'pending_conclusions' | 'observer_dashboard' | 'help_requests' | 'security_reports';
   let activeTab = $state<Tab>('experiments');
 
   let experiments: any[] = $state([]);
@@ -143,6 +143,25 @@
       : helpRequests.filter((r: any) => r.status === helpStatusFilter)
   );
 
+  // Security reports
+  let securityReports: any[] = $state([]);
+  let secReportOpen = $state(false);
+  let secTitle = $state('');
+  let secCategory = $state('Equipment Damage');
+  let secDesc = $state('');
+  let secSeverity = $state('low');
+  let secReportFilter = $state('all');
+  const filteredSecurityReports = $derived(
+    secReportFilter === 'all' ? securityReports : securityReports.filter((r: any) => r.status === secReportFilter)
+  );
+  let secSeverityFilter = $state('all');
+  const visibleSecurityReports = $derived(
+    filteredSecurityReports.filter((r: any) => secSeverityFilter === 'all' || (r.severity ?? '').toLowerCase() === secSeverityFilter)
+  );
+  let secRelatedExperimentId = $state('');
+  let secRelatedTaskId = $state('');
+  let secAttachmentFiles = $state<File[]>([]);
+
   function getUserName(userId: string | undefined | null): string {
     if (!userId) return '—';
     const u = allUsers.find((u: any) => u.id === userId);
@@ -154,12 +173,13 @@
     if (!s) return;
     loading = true;
     try {
-      [experiments, species, tests, researchTasks, helpRequests] = await Promise.all([
+      [experiments, species, tests, researchTasks, helpRequests, securityReports] = await Promise.all([
         researchApi.getExperiments(s.token),
         researchApi.getSpeciesArchive(s.token),
         researchApi.getTestArchive(s.token),
         researchTaskApi.getTasks(s.token),
         aerospaceApi.getHelpRequests(s.token),
+        researchSecurityApi.getReports(s.token),
       ]);
       experiments = experiments.filter((e: any) => e.experiment_type === 'new_species');
       allUsers = await userApi.getAll(s.token);
@@ -355,6 +375,56 @@
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
+  async function submitSecurityReport() {
+    const s = $session; if (!s) return;
+    if (!secTitle.trim()) { showToast('Title is required', 'error'); return; }
+    if (!secDesc.trim()) { showToast('Description is required', 'error'); return; }
+    try {
+      const attachments = secAttachmentFiles.length > 0
+        ? secAttachmentFiles.map((f) => ({ name: f.name, size: f.size, type: f.type }))
+        : undefined;
+      await researchSecurityApi.submitReport(
+        s.token,
+        secTitle,
+        secCategory,
+        secDesc,
+        secSeverity,
+        secRelatedExperimentId.trim() || undefined,
+        secRelatedTaskId.trim() || undefined,
+        attachments,
+      );
+      showToast('Security report submitted', 'success');
+      secReportOpen = false;
+      secTitle = '';
+      secCategory = 'Equipment Damage';
+      secDesc = '';
+      secSeverity = 'low';
+      secRelatedExperimentId = '';
+      secRelatedTaskId = '';
+      secAttachmentFiles = [];
+      securityReports = await researchSecurityApi.getReports(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  function secStatusBadgeClass(status: string | null | undefined): string {
+    switch (status) {
+      case 'acknowledged': return 'badge badge-progress';
+      case 'investigating': return 'badge badge-conclude';
+      case 'resolved': return 'badge badge-done';
+      case 'closed': return 'badge badge-rejected';
+      default: return 'badge badge-open';
+    }
+  }
+
+  function secSeverityBadgeClass(severity: string | null | undefined): string {
+    switch ((severity ?? '').toLowerCase()) {
+      case 'critical': return 'badge badge-critical';
+      case 'high': return 'badge badge-high';
+      case 'medium': return 'badge badge-medium';
+      default: return 'badge badge-low';
+    }
+  }
+
   function statusBadgeClass(status: string | null | undefined): string {
     switch (status) {
       case 'pending': return 'badge badge-open';
@@ -411,6 +481,34 @@
     { value: 'fungus', label: 'Fungus' },
     { value: 'other', label: 'Other' },
   ];
+  const secCategoryOpts = [
+    { value: 'Equipment Damage', label: 'Equipment Damage' },
+    { value: 'Safety Violation', label: 'Safety Violation' },
+    { value: 'Unauthorized Access', label: 'Unauthorized Access' },
+    { value: 'Data Breach', label: 'Data Breach' },
+    { value: 'Other', label: 'Other' },
+  ];
+  const secSeverityOpts = [
+    { value: 'low', label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
+    { value: 'critical', label: 'Critical' },
+  ];
+  const secStatusFilterOpts = [
+    { value: 'all', label: 'All' },
+    { value: 'new', label: 'New' },
+    { value: 'acknowledged', label: 'Acknowledged' },
+    { value: 'investigating', label: 'Investigating' },
+    { value: 'resolved', label: 'Resolved' },
+    { value: 'closed', label: 'Closed' },
+  ];
+  const secSeverityFilterOpts = [
+    { value: 'all', label: 'All' },
+    { value: 'low', label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
+    { value: 'critical', label: 'Critical' },
+  ];
   const isDirector = $derived(($session?.tier ?? 0) >= 3);
 </script>
 
@@ -436,6 +534,9 @@
     {/if}
     <button class="tab" class:active={activeTab==='help_requests'} onclick={() => activeTab='help_requests'}>
       Help Requests {#if helpRequests.filter((r: any) => r.status === 'open').length > 0}<span class="tab-badge">{helpRequests.filter((r: any) => r.status === 'open').length}</span>{/if}
+    </button>
+    <button class="tab" class:active={activeTab==='security_reports'} onclick={() => activeTab='security_reports'}>
+      Security Reports
     </button>
   </div>
 
@@ -753,6 +854,52 @@
       emptyMessage="No help requests found."
       emptyFilteredMessage="No help requests match the selected filter."
     />
+  {:else if activeTab === 'security_reports'}
+    <div class="section-bar">
+      <h2 class="section-title">Security Reports</h2>
+      {#if canPerform($session, 'biologist') || canPerform($session, 'biological_engineer') || canPerform($session, 'agricultural_engineer')}
+        <button class="btn-primary" onclick={() => secReportOpen = true}>+ Submit Security Report</button>
+      {/if}
+    </div>
+    <p class="access-note">🔒 Reports are routed directly to security staff. Researchers can only view reports they submitted.</p>
+    <div class="table-wrap" style="margin-bottom:0.75rem;">
+      <div class="form" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.75rem;">
+        <Field label="Status Filter" type="select" bind:value={secReportFilter} options={secStatusFilterOpts} />
+        <Field label="Severity Filter" type="select" bind:value={secSeverityFilter} options={secSeverityFilterOpts} />
+      </div>
+    </div>
+    {#if visibleSecurityReports.length === 0}
+      <p class="empty">{securityReports.length === 0 ? 'No security reports submitted yet.' : 'No reports match the selected filters.'}</p>
+    {:else}
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Category</th>
+              <th>Severity</th>
+              <th>Status</th>
+              <th>Related Ref</th>
+              <th>Security Notes</th>
+              <th>Submitted</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each visibleSecurityReports as r}
+              <tr>
+                <td>{r.title}</td>
+                <td>{r.category ?? '—'}</td>
+                <td><span class={secSeverityBadgeClass(r.severity)}>{r.severity ?? 'low'}</span></td>
+                <td><span class={secStatusBadgeClass(r.status)}>{r.status ?? 'new'}</span></td>
+                <td>{r.related_experiment_id ?? r.related_task_id ?? '—'}</td>
+                <td class="notes-preview">{r.security_staff_notes ?? '—'}</td>
+                <td>{r.submitted_at ? new Date(r.submitted_at).toLocaleDateString() : '—'}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
   {/if}
 </PageShell>
 
@@ -926,6 +1073,36 @@
   </div>
 </Modal>
 
+<Modal bind:open={secReportOpen} title="Submit Security Report">
+  <div class="form">
+    <Field label="Title" bind:value={secTitle} required />
+    <Field label="Category" type="select" bind:value={secCategory} options={secCategoryOpts} />
+    <Field label="Description" type="textarea" bind:value={secDesc} rows={4} required />
+    <Field label="Severity" type="select" bind:value={secSeverity} options={secSeverityOpts} />
+    <Field label="Related Experiment ID (optional)" bind:value={secRelatedExperimentId} />
+    <Field label="Related Task ID (optional)" bind:value={secRelatedTaskId} />
+    <div class="field">
+      <span class="field-label">Attachments (optional)</span>
+      <input
+        class="field-input"
+        type="file"
+        multiple
+        onchange={(e) => {
+          const input = e.target as HTMLInputElement;
+          secAttachmentFiles = input.files ? Array.from(input.files) : [];
+        }}
+      />
+      {#if secAttachmentFiles.length > 0}
+        <p class="info-text">{secAttachmentFiles.length} file(s) selected</p>
+      {/if}
+    </div>
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => secReportOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitSecurityReport}>Submit Report</button>
+    </div>
+  </div>
+</Modal>
+
 <style>
   .tabs { display: flex; gap: 0; border-bottom: 1px solid #1e2d4a; margin-bottom: 1.5rem; flex-wrap: wrap; }
   .tab { background: none; border: none; border-bottom: 2px solid transparent; color: #8fa3cc; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; padding: 0.75rem 1.25rem; text-transform: uppercase; transition: all 0.15s; }
@@ -996,6 +1173,10 @@
   .access-note { background: rgba(255,193,7,0.07); border: 1px solid rgba(255,193,7,0.2); border-radius: 4px; color: #ffc107; font-size: 0.82rem; line-height: 1.5; margin-bottom: 1rem; padding: 0.6rem 0.75rem; }
   .plant-only-badge { background: rgba(0,200,83,0.12); border-radius: 3px; color: #00c853; font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.05em; margin-left: 0.5rem; padding: 0.2rem 0.5rem; text-transform: uppercase; vertical-align: middle; }
   .proxy-badge { background: rgba(0,212,255,0.1); border-radius: 3px; color: #00d4ff; font-family: 'Space Mono', monospace; font-size: 0.65rem; padding: 0.2rem 0.5rem; }
+  .badge-low { background: rgba(0,200,83,0.12); color: #00c853; }
+  .badge-medium { background: rgba(255,193,7,0.12); color: #ffc107; }
+  .badge-high { background: rgba(255,152,0,0.12); color: #ff9800; }
+  .badge-critical { background: rgba(255,68,102,0.15); color: #ff4466; }
   .species-cat-badge { border-radius: 3px; font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.05em; padding: 0.2rem 0.5rem; text-transform: uppercase; }
   .species-cat-plant { background: rgba(0,200,83,0.12); color: #00c853; }
   .species-cat-animal { background: rgba(255,152,0,0.12); color: #ff9800; }

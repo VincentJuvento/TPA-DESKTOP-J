@@ -6,11 +6,11 @@
   import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
   import { canPerform } from '$lib/stores/permissions';
-  import { researchTaskApi, aerospaceApi, userApi } from '$lib/api';
+  import { researchTaskApi, aerospaceApi, userApi, researchSecurityApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
-  type Tab = 'assigned_tasks' | 'my_tasks' | 'pending_conclusions' | 'help_requests';
+  type Tab = 'assigned_tasks' | 'my_tasks' | 'pending_conclusions' | 'help_requests' | 'security_reports';
   let activeTab = $state<Tab>('assigned_tasks');
 
   let tasks: any[] = $state([]);
@@ -74,6 +74,15 @@
   let helpDeliverTarget: any = $state(null);
   let helpDeliverResponse = $state('');
 
+  // Security report form
+  let securityReports: any[] = $state([]);
+  let secReportOpen = $state(false);
+  let secTitle = $state('');
+  let secCategory = $state('Equipment Damage');
+  let secDesc = $state('');
+  let secSeverity = $state('low');
+  let secReportFilter = $state('all');
+
   const isDirector = $derived(
     canPerform($session, 'the_artificer') ||
     canPerform($session, 'the_taskmaster') ||
@@ -91,10 +100,11 @@
     const s = $session; if (!s) return;
     loading = true;
     try {
-      [tasks, helpRequests, allUsers] = await Promise.all([
+      [tasks, helpRequests, allUsers, securityReports] = await Promise.all([
         researchTaskApi.getTasks(s.token),
         aerospaceApi.getHelpRequests(s.token),
         userApi.getAll(s.token),
+        researchSecurityApi.getReports(s.token),
       ]);
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
     loading = false;
@@ -260,6 +270,41 @@
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
+  async function submitSecurityReport() {
+    const s = $session; if (!s) return;
+    if (!secTitle.trim()) { showToast('Title is required', 'error'); return; }
+    if (!secDesc.trim()) { showToast('Description is required', 'error'); return; }
+    try {
+      await researchSecurityApi.submitReport(s.token, secTitle, secCategory, secDesc, secSeverity);
+      showToast('Security report submitted', 'success');
+      secReportOpen = false; secTitle = ''; secDesc = ''; secCategory = 'Equipment Damage'; secSeverity = 'low';
+      securityReports = await researchSecurityApi.getReports(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  function severityBadgeClass(severity: string): string {
+    switch (severity) {
+      case 'critical': return 'badge badge-critical';
+      case 'high': return 'badge badge-high';
+      case 'medium': return 'badge badge-medium';
+      default: return 'badge badge-low';
+    }
+  }
+
+  function secStatusBadgeClass(status: string): string {
+    switch (status) {
+      case 'resolved':
+      case 'closed': return 'badge badge-done';
+      case 'investigating': return 'badge badge-progress';
+      case 'acknowledged': return 'badge badge-vote';
+      default: return 'badge badge-open';
+    }
+  }
+
+  const filteredSecurityReports = $derived(
+    secReportFilter === 'all' ? securityReports : securityReports.filter((r: any) => r.status === secReportFilter)
+  );
+
   function statusBadgeClass(status: string | null | undefined): string {
     switch (status) {
       case 'pending': return 'badge badge-open';
@@ -316,6 +361,7 @@
       </button>
     {/if}
     <button class="tab" class:active={activeTab === 'help_requests'} onclick={() => activeTab = 'help_requests'}>Help Requests</button>
+    <button class="tab" class:active={activeTab === 'security_reports'} onclick={() => activeTab = 'security_reports'}>Security Reports</button>
   </div>
 
   {#if loading}
@@ -501,6 +547,50 @@
         </table>
       </div>
     {/if}
+
+  {:else if activeTab === 'security_reports'}
+    <div class="section-bar">
+      <h2 class="section-title">Security Reports</h2>
+      {#if isMathematician}
+        <button class="btn-primary" onclick={() => secReportOpen = true}>+ Submit Report</button>
+      {/if}
+    </div>
+    <p class="access-note">🔒 Security reports are submitted directly to security staff for review. You can only view reports you have submitted.</p>
+    <div class="tabs" style="margin-bottom:1rem;border-bottom:1px solid #1e2d4a;">
+      {#each [['all','All'],['new','New'],['acknowledged','Acknowledged'],['investigating','Investigating'],['resolved','Resolved'],['closed','Closed']] as [val, label]}
+        <button class="tab" class:active={secReportFilter === val} onclick={() => secReportFilter = val}>{label}</button>
+      {/each}
+    </div>
+    {#if filteredSecurityReports.length === 0}
+      <p class="empty">{securityReports.length === 0 ? 'No security reports submitted yet.' : 'No reports match the selected filter.'}</p>
+    {:else}
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Category</th>
+              <th>Severity</th>
+              <th>Status</th>
+              <th>Staff Notes</th>
+              <th>Submitted</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each filteredSecurityReports as r}
+              <tr>
+                <td>{r.title}</td>
+                <td>{r.category}</td>
+                <td><span class={severityBadgeClass(r.severity)}>{r.severity}</span></td>
+                <td><span class={secStatusBadgeClass(r.status)}>{r.status}</span></td>
+                <td class="desc-cell">{r.security_staff_notes ?? '—'}</td>
+                <td>{r.submitted_at ? new Date(r.submitted_at).toLocaleDateString() : '—'}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
   {/if}
 </PageShell>
 
@@ -654,6 +744,37 @@
   </div>
 </Modal>
 
+<!-- Submit Security Report Modal -->
+<Modal bind:open={secReportOpen} title="Submit Security Report">
+  <div class="form">
+    <Field label="Title" bind:value={secTitle} required />
+    <div class="field">
+      <label class="field-label">Category</label>
+      <select class="field-input" bind:value={secCategory}>
+        <option>Equipment Damage</option>
+        <option>Safety Violation</option>
+        <option>Unauthorized Access</option>
+        <option>Data Breach</option>
+        <option>Other</option>
+      </select>
+    </div>
+    <div class="field">
+      <label class="field-label">Severity</label>
+      <select class="field-input" bind:value={secSeverity}>
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high">High</option>
+        <option value="critical">Critical</option>
+      </select>
+    </div>
+    <Field label="Description" type="textarea" bind:value={secDesc} rows={4} required />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => secReportOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitSecurityReport}>Submit Report</button>
+    </div>
+  </div>
+</Modal>
+
 <style>
   .tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid #1e2d4a; margin-bottom: 1.5rem; }
   .tab {
@@ -685,6 +806,10 @@
   .badge-vote { background: #2a2a5a; color: #8888ff; }
   .badge-done { background: #0d3a2a; color: #00d4a0; }
   .badge-cancelled { background: #3a1a1a; color: #ff6666; }
+  .badge-low { background: rgba(0,200,83,0.12); color: #00c853; }
+  .badge-medium { background: rgba(255,193,7,0.12); color: #ffc107; }
+  .badge-high { background: rgba(255,152,0,0.12); color: #ff9800; }
+  .badge-critical { background: rgba(255,68,102,0.15); color: #ff4466; }
   .proxy-badge { background: #1e2d4a; border-radius: 3px; color: #3d7fff; font-family: 'Space Mono', monospace; font-size: 0.65rem; padding: 0.15rem 0.5rem; }
   .btn-primary { background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
   .btn-secondary { background: none; border: 1px solid #1e2d4a; border-radius: 4px; color: #8fa3cc; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
@@ -700,6 +825,7 @@
   .form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
   .field { display: flex; flex-direction: column; gap: 0.375rem; }
   .field-label { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
+  .field-input { background: #0d1528; border: 1px solid #1e2d4a; border-radius: 4px; color: #e8eeff; font-size: 0.85rem; padding: 0.5rem 0.75rem; width: 100%; box-sizing: border-box; }
   .info-text { color: #8fa3cc; font-size: 0.85rem; }
   .info-block { background: #0d1526; border: 1px solid #1e2d4a; border-radius: 4px; display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem; }
   .vote-note { background: #0d1a2e; border: 1px solid #1e3a5c; border-radius: 4px; color: #8fa3cc; font-size: 0.8rem; padding: 0.625rem 0.75rem; }

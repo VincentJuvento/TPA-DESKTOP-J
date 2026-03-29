@@ -158,6 +158,10 @@ pub fn run() {
             commands::security_commands::update_security_task_status,
             commands::security_commands::submit_external_report,
             commands::security_commands::get_external_reports,
+            commands::security_commands::submit_security_report,
+            commands::security_commands::get_security_reports,
+            commands::security_commands::acknowledge_security_report,
+            commands::security_commands::update_security_report_status,
             // astronaut
             commands::astronaut_commands::get_missions,
             commands::astronaut_commands::create_mission,
