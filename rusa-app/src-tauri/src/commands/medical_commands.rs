@@ -14,8 +14,14 @@ struct MedicalTaskRow {
     assigned_by: Option<Uuid>,
     status: Option<String>,
     progress_notes: Option<String>,
+    activity_logs: Option<serde_json::Value>,
     due_date: Option<chrono::DateTime<chrono::Utc>>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
+    conclusion_requested_at: Option<chrono::DateTime<chrono::Utc>>,
+    conclusion_requested_by: Option<Uuid>,
+    conclusion_approved_at: Option<chrono::DateTime<chrono::Utc>>,
+    conclusion_approved_by: Option<Uuid>,
+    final_notes: Option<String>,
 }
 
 async fn ensure_medical_tasks_table() -> Result<(), String> {
@@ -36,6 +42,21 @@ async fn ensure_medical_tasks_table() -> Result<(), String> {
     .execute(db::get_db())
     .await
     .map_err(|e| format!("DB error creating table: {}", e))?;
+
+    let alter_stmts = [
+        "ALTER TABLE medical_assigned_tasks ADD COLUMN IF NOT EXISTS activity_logs JSONB DEFAULT '[]'",
+        "ALTER TABLE medical_assigned_tasks ADD COLUMN IF NOT EXISTS conclusion_requested_at TIMESTAMPTZ",
+        "ALTER TABLE medical_assigned_tasks ADD COLUMN IF NOT EXISTS conclusion_requested_by UUID REFERENCES users(id)",
+        "ALTER TABLE medical_assigned_tasks ADD COLUMN IF NOT EXISTS conclusion_approved_at TIMESTAMPTZ",
+        "ALTER TABLE medical_assigned_tasks ADD COLUMN IF NOT EXISTS conclusion_approved_by UUID REFERENCES users(id)",
+        "ALTER TABLE medical_assigned_tasks ADD COLUMN IF NOT EXISTS final_notes TEXT",
+    ];
+    for stmt in &alter_stmts {
+        sqlx::query(stmt)
+            .execute(db::get_db())
+            .await
+            .map_err(|e| format!("DB migration error: {}", e))?;
+    }
     Ok(())
 }
 
@@ -83,6 +104,12 @@ pub async fn assign_medical_task(
     Ok(row.0.to_string())
 }
 
+const MEDICAL_TASK_SELECT: &str =
+    "SELECT id, title, description, assigned_to, assigned_by, status, progress_notes, activity_logs, \
+     due_date, created_at, conclusion_requested_at, conclusion_requested_by, \
+     conclusion_approved_at, conclusion_approved_by, final_notes \
+     FROM medical_assigned_tasks";
+
 #[tauri::command]
 pub async fn get_medical_tasks(token: String) -> Result<Vec<serde_json::Value>, String> {
     let session = validate_session_command(&token).await?;
@@ -91,14 +118,14 @@ pub async fn get_medical_tasks(token: String) -> Result<Vec<serde_json::Value>, 
 
     let rows = if permissions::has_permission(&session.role_name, "head_of_medicine") {
         sqlx::query_as::<_, MedicalTaskRow>(
-            "SELECT id, title, description, assigned_to, assigned_by, status, progress_notes, due_date, created_at FROM medical_assigned_tasks WHERE assigned_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
+            &format!("{} WHERE assigned_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC", MEDICAL_TASK_SELECT),
         )
         .bind(session.user_id)
         .fetch_all(db::get_db())
         .await
     } else {
         sqlx::query_as::<_, MedicalTaskRow>(
-            "SELECT id, title, description, assigned_to, assigned_by, status, progress_notes, due_date, created_at FROM medical_assigned_tasks WHERE assigned_to = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
+            &format!("{} WHERE assigned_to = $1 AND deleted_at IS NULL ORDER BY created_at DESC", MEDICAL_TASK_SELECT),
         )
         .bind(session.user_id)
         .fetch_all(db::get_db())
@@ -110,6 +137,25 @@ pub async fn get_medical_tasks(token: String) -> Result<Vec<serde_json::Value>, 
         .into_iter()
         .map(|r| serde_json::to_value(r).unwrap_or_default())
         .collect())
+}
+
+#[tauri::command]
+pub async fn get_medical_task(token: String, task_id: String) -> Result<serde_json::Value, String> {
+    let session = validate_session_command(&token).await?;
+    ensure_medical_tasks_table().await?;
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
+
+    let row = sqlx::query_as::<_, MedicalTaskRow>(
+        &format!("{} WHERE id = $1 AND (assigned_to = $2 OR assigned_by = $2) AND deleted_at IS NULL", MEDICAL_TASK_SELECT),
+    )
+    .bind(tid)
+    .bind(session.user_id)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    row.map(|r| serde_json::to_value(r).unwrap_or_default())
+        .ok_or_else(|| "Task not found".to_string())
 }
 
 #[tauri::command]
@@ -125,13 +171,55 @@ pub async fn update_medical_task_status(
 
     let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
 
+    // Fetch task to check authorization and current status
+    let task: Option<(Option<Uuid>, Option<Uuid>, Option<String>)> = sqlx::query_as(
+        "SELECT assigned_to, assigned_by, status FROM medical_assigned_tasks WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(tid)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let (assigned_to, assigned_by, current_status) = task.ok_or_else(|| "Task not found".to_string())?;
+
+    let is_assigner = assigned_by.map(|id| id == session.user_id).unwrap_or(false);
+    let is_assignee = assigned_to.map(|id| id == session.user_id).unwrap_or(false);
+    let is_head = permissions::has_permission(&session.role_name, "head_of_medicine");
+
+    if !is_assigner && !is_assignee && !is_head {
+        return Err("You do not have permission to update this task".to_string());
+    }
+
+    // Subordinates cannot set status to 'completed'
+    if !is_assigner && !is_head && status == "completed" {
+        return Err("Only the task assigner can mark a task as completed".to_string());
+    }
+
+    // Subordinates cannot change status when conclusion is requested (unless assigner)
+    if !is_assigner && !is_head && current_status.as_deref() == Some("conclusion_requested") {
+        return Err("Status cannot be changed while awaiting assigner review".to_string());
+    }
+
+    let log_entry = serde_json::json!([{
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "author_id": session.user_id.to_string(),
+        "author_name": session.full_name,
+        "content": format!("Status changed to '{}'{}",
+            status,
+            progress_notes.as_deref().map(|n| format!(": {}", n)).unwrap_or_default()),
+        "log_type": "status_change"
+    }]);
+
     sqlx::query(
-        "UPDATE medical_assigned_tasks SET status = $1, progress_notes = COALESCE($2, progress_notes) WHERE id = $3 AND (assigned_to = $4 OR assigned_by = $4) AND deleted_at IS NULL",
+        "UPDATE medical_assigned_tasks SET status = $1, \
+         progress_notes = COALESCE($2, progress_notes), \
+         activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $3 \
+         WHERE id = $4 AND deleted_at IS NULL",
     )
     .bind(&status)
     .bind(&progress_notes)
+    .bind(&log_entry)
     .bind(tid)
-    .bind(session.user_id)
     .execute(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
@@ -146,6 +234,185 @@ pub async fn update_medical_task_status(
     )
     .await;
 
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn append_medical_task_activity_log(
+    token: String,
+    task_id: String,
+    content: String,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    ensure_medical_tasks_table().await?;
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
+
+    // Verify access
+    let task: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT status FROM medical_assigned_tasks WHERE id = $1 AND (assigned_to = $2 OR assigned_by = $2) AND deleted_at IS NULL",
+    )
+    .bind(tid)
+    .bind(session.user_id)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    if task.is_none() {
+        return Err("Task not found or access denied".to_string());
+    }
+
+    let entry = serde_json::json!([{
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "author_id": session.user_id.to_string(),
+        "author_name": session.full_name,
+        "content": content,
+        "log_type": "progress_update"
+    }]);
+
+    sqlx::query(
+        "UPDATE medical_assigned_tasks SET activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $1 WHERE id = $2 AND deleted_at IS NULL",
+    )
+    .bind(&entry)
+    .bind(tid)
+    .execute(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "APPEND_MEDICAL_TASK_LOG", Some("medical_assigned_tasks"), Some(tid), None, None).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn request_medical_task_conclusion(
+    token: String,
+    task_id: String,
+    notes: String,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    ensure_medical_tasks_table().await?;
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
+
+    if notes.trim().is_empty() {
+        return Err("Conclusion notes are required".to_string());
+    }
+
+    let task: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT status FROM medical_assigned_tasks WHERE id = $1 AND assigned_to = $2 AND deleted_at IS NULL",
+    )
+    .bind(tid)
+    .bind(session.user_id)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    match task {
+        None => return Err("Task not found or not assigned to you".to_string()),
+        Some((status,)) => {
+            let s = status.as_deref().unwrap_or("pending");
+            if s == "conclusion_requested" || s == "completed" {
+                return Err("Task is already in conclusion or completed state".to_string());
+            }
+        }
+    }
+
+    let log_entry = serde_json::json!([{
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "author_id": session.user_id.to_string(),
+        "author_name": session.full_name,
+        "content": notes,
+        "log_type": "conclusion_requested"
+    }]);
+
+    sqlx::query(
+        "UPDATE medical_assigned_tasks SET status = 'conclusion_requested', \
+         conclusion_requested_at = NOW(), conclusion_requested_by = $1, \
+         final_notes = $2, \
+         activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $3 \
+         WHERE id = $4 AND deleted_at IS NULL",
+    )
+    .bind(session.user_id)
+    .bind(&notes)
+    .bind(&log_entry)
+    .bind(tid)
+    .execute(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "REQUEST_MEDICAL_TASK_CONCLUSION", Some("medical_assigned_tasks"), Some(tid), None, None).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn review_medical_task_conclusion(
+    token: String,
+    task_id: String,
+    decision: String,
+    review_notes: Option<String>,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    ensure_medical_tasks_table().await?;
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
+
+    let task: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT status FROM medical_assigned_tasks WHERE id = $1 AND assigned_by = $2 AND deleted_at IS NULL",
+    )
+    .bind(tid)
+    .bind(session.user_id)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    match &task {
+        None => return Err("Task not found or you are not the assigner".to_string()),
+        Some((status,)) => {
+            if status.as_deref() != Some("conclusion_requested") {
+                return Err("Task is not awaiting conclusion review".to_string());
+            }
+        }
+    }
+
+    let new_status = match decision.as_str() {
+        "approve" => "completed",
+        "reject" => "in_progress",
+        _ => return Err("Invalid decision. Use 'approve' or 'reject'".to_string()),
+    };
+
+    let log_type = if new_status == "completed" { "conclusion_approved" } else { "conclusion_rejected" };
+    let log_entry = serde_json::json!([{
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "author_id": session.user_id.to_string(),
+        "author_name": session.full_name,
+        "content": review_notes.as_deref().unwrap_or(""),
+        "log_type": log_type
+    }]);
+
+    if new_status == "completed" {
+        sqlx::query(
+            "UPDATE medical_assigned_tasks SET status = 'completed', \
+             conclusion_approved_at = NOW(), conclusion_approved_by = $1, \
+             activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $2 \
+             WHERE id = $3 AND deleted_at IS NULL",
+        )
+        .bind(session.user_id)
+        .bind(&log_entry)
+        .bind(tid)
+        .execute(db::get_db())
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+    } else {
+        sqlx::query(
+            "UPDATE medical_assigned_tasks SET status = 'in_progress', \
+             activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $1 \
+             WHERE id = $2 AND deleted_at IS NULL",
+        )
+        .bind(&log_entry)
+        .bind(tid)
+        .execute(db::get_db())
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+    }
+
+    let _ = write_audit_log(Some(session.user_id), "REVIEW_MEDICAL_TASK_CONCLUSION", Some("medical_assigned_tasks"), Some(tid), None, Some(serde_json::json!({ "decision": decision }))).await;
     Ok(())
 }
 

@@ -161,8 +161,15 @@ export const securityApi = {
   assignTask: (token: string, assignedTo: string, title: string, description?: string, dueDate?: string) =>
     invoke<string>('assign_security_task', { token, assignedTo, title, description, dueDate }),
   getSecurityTasks: (token: string) => invoke<any[]>('get_security_tasks', { token }),
+  getSecurityTask: (token: string, taskId: string) => invoke<any>('get_security_task', { token, taskId }),
   updateSecurityTaskStatus: (token: string, taskId: string, status: string) =>
     invoke<void>('update_security_task_status', { token, taskId, status }),
+  appendSecurityTaskLog: (token: string, taskId: string, content: string) =>
+    invoke<void>('append_security_task_activity_log', { token, taskId, content }),
+  requestSecurityTaskConclusion: (token: string, taskId: string, notes: string) =>
+    invoke<void>('request_security_task_conclusion', { token, taskId, notes }),
+  reviewSecurityTaskConclusion: (token: string, taskId: string, decision: string, reviewNotes?: string) =>
+    invoke<void>('review_security_task_conclusion', { token, taskId, decision, reviewNotes }),
   submitExternalReport: (token: string, title: string, description: string, securityType?: string) =>
     invoke<string>('submit_external_report', { token, title, description, securityType }),
   getExternalReports: (token: string) => invoke<any[]>('get_external_reports', { token }),
@@ -216,10 +223,17 @@ export const astronautApi = {
 export const settlementApi = {
   getSettlements: (token: string) => invoke<any[]>('get_settlements', { token }),
   getTasks: (token: string) => invoke<any[]>('get_settler_tasks', { token }),
+  getTask: (token: string, taskId: string) => invoke<any>('get_settler_task', { token, taskId }),
   assignTask: (token: string, assignedTo: string, title: string, description?: string, dueDate?: string, settlementId?: string) =>
     invoke<string>('assign_settler_task', { token, assignedTo, title, description, dueDate, settlementId }),
   updateTaskProgress: (token: string, taskId: string, progressNotes: string, status: string) =>
     invoke<void>('update_task_progress', { token, taskId, progressNotes, status }),
+  appendTaskLog: (token: string, taskId: string, content: string) =>
+    invoke<void>('append_settler_task_activity_log', { token, taskId, content }),
+  requestTaskConclusion: (token: string, taskId: string, notes: string) =>
+    invoke<void>('request_settler_task_conclusion', { token, taskId, notes }),
+  reviewTaskConclusion: (token: string, taskId: string, decision: string, reviewNotes?: string) =>
+    invoke<void>('review_settler_task_conclusion', { token, taskId, decision, reviewNotes }),
   submitSupplyRequest: (token: string, settlementId?: string, title?: string, description?: string, items?: string) =>
     invoke<string>('submit_supply_request', { token, settlementId, title, description, items }),
   reviewSupplyRequest: (token: string, requestId: string, decision: string, notes?: string) =>
@@ -290,8 +304,15 @@ export const psychiatryApi = {
   assignTask: (token: string, assignedTo: string, title: string, description?: string, dueDate?: string) =>
     invoke<string>('assign_psychiatry_task', { token, assignedTo, title, description, dueDate }),
   getTasks: (token: string) => invoke<any[]>('get_psychiatry_tasks', { token }),
+  getTask: (token: string, taskId: string) => invoke<any>('get_psychiatry_task', { token, taskId }),
   updateTaskStatus: (token: string, taskId: string, status: string, progressNotes?: string) =>
     invoke<void>('update_psychiatry_task_status', { token, taskId, status, progressNotes }),
+  appendTaskLog: (token: string, taskId: string, content: string) =>
+    invoke<void>('append_psychiatry_task_activity_log', { token, taskId, content }),
+  requestTaskConclusion: (token: string, taskId: string, notes: string) =>
+    invoke<void>('request_psychiatry_task_conclusion', { token, taskId, notes }),
+  reviewTaskConclusion: (token: string, taskId: string, decision: string, reviewNotes?: string) =>
+    invoke<void>('review_psychiatry_task_conclusion', { token, taskId, decision, reviewNotes }),
 };
 
 // Medical
@@ -311,17 +332,31 @@ export const medicalApi = {
   assignTask: (token: string, assignedTo: string, title: string, description?: string, dueDate?: string) =>
     invoke<string>('assign_medical_task', { token, assignedTo, title, description, dueDate }),
   getTasks: (token: string) => invoke<any[]>('get_medical_tasks', { token }),
+  getTask: (token: string, taskId: string) => invoke<any>('get_medical_task', { token, taskId }),
   updateTaskStatus: (token: string, taskId: string, status: string, progressNotes?: string) =>
     invoke<void>('update_medical_task_status', { token, taskId, status, progressNotes }),
+  appendTaskLog: (token: string, taskId: string, content: string) =>
+    invoke<void>('append_medical_task_activity_log', { token, taskId, content }),
+  requestTaskConclusion: (token: string, taskId: string, notes: string) =>
+    invoke<void>('request_medical_task_conclusion', { token, taskId, notes }),
+  reviewTaskConclusion: (token: string, taskId: string, decision: string, reviewNotes?: string) =>
+    invoke<void>('review_medical_task_conclusion', { token, taskId, decision, reviewNotes }),
 };
 
 // Sanitary
 export const sanitaryApi = {
   getTasks: (token: string) => invoke<any[]>('get_sanitary_tasks', { token }),
+  getTask: (token: string, taskId: string) => invoke<any>('get_sanitary_task', { token, taskId }),
   assignTask: (token: string, assignedTo: string, title: string, description?: string, division?: string, dueDate?: string) =>
     invoke<string>('assign_sanitary_task', { token, assignedTo, title, description, division, dueDate }),
   updateTask: (token: string, taskId: string, status: string) =>
     invoke<void>('update_sanitary_task', { token, taskId, status }),
+  appendTaskLog: (token: string, taskId: string, content: string) =>
+    invoke<void>('append_sanitary_task_activity_log', { token, taskId, content }),
+  requestTaskConclusion: (token: string, taskId: string, notes: string) =>
+    invoke<void>('request_sanitary_task_conclusion', { token, taskId, notes }),
+  reviewTaskConclusion: (token: string, taskId: string, decision: string, reviewNotes?: string) =>
+    invoke<void>('review_sanitary_task_conclusion', { token, taskId, decision, reviewNotes }),
   getInventory: (token: string) => invoke<any[]>('get_sanitary_inventory', { token }),
   updateInventory: (token: string, itemName: string, category?: string, quantity?: number, unit?: string) =>
     invoke<string>('update_sanitary_inventory', { token, itemName, category, quantity, unit }),
@@ -419,8 +454,11 @@ export const aerospaceApi = {
   assignTask: (token: string, assignedTo: string, title: string, description?: string, dueDate?: string) =>
     invoke<string>('assign_aerospace_task', { token, assignedTo, title, description, dueDate }),
   getAssignedTasks: (token: string) => invoke<any[]>('get_aerospace_assigned_tasks', { token }),
+  getTask: (token: string, taskId: string) => invoke<any>('get_aerospace_task', { token, taskId }),
   updateTaskStatus: (token: string, taskId: string, status: string, progressNotes?: string) =>
     invoke<void>('update_aerospace_task_status', { token, taskId, status, progressNotes }),
+  appendTaskLog: (token: string, taskId: string, content: string) =>
+    invoke<void>('append_aerospace_task_activity_log', { token, taskId, content }),
   submitBlueprintProposal: (token: string, shipName: string, blueprintDescription: string, designSpecs?: string, shipId?: string) =>
     invoke<string>('submit_blueprint_proposal', { token, shipName, blueprintDescription, designSpecs, shipId }),
   getBlueprintProposals: (token: string) => invoke<any[]>('get_blueprint_proposals', { token }),

@@ -24,7 +24,13 @@ struct SettlerTaskRow {
     settlement_id: Option<Uuid>,
     due_date: Option<chrono::NaiveDate>,
     progress_notes: Option<String>,
+    activity_logs: Option<serde_json::Value>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
+    conclusion_requested_at: Option<chrono::DateTime<chrono::Utc>>,
+    conclusion_requested_by: Option<Uuid>,
+    conclusion_approved_at: Option<chrono::DateTime<chrono::Utc>>,
+    conclusion_approved_by: Option<Uuid>,
+    final_notes: Option<String>,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -64,6 +70,29 @@ struct InventoryRow {
     updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+async fn ensure_settler_task_columns() -> Result<(), String> {
+    let alter_stmts = [
+        "ALTER TABLE settler_tasks ADD COLUMN IF NOT EXISTS activity_logs JSONB DEFAULT '[]'",
+        "ALTER TABLE settler_tasks ADD COLUMN IF NOT EXISTS conclusion_requested_at TIMESTAMPTZ",
+        "ALTER TABLE settler_tasks ADD COLUMN IF NOT EXISTS conclusion_requested_by UUID REFERENCES users(id)",
+        "ALTER TABLE settler_tasks ADD COLUMN IF NOT EXISTS conclusion_approved_at TIMESTAMPTZ",
+        "ALTER TABLE settler_tasks ADD COLUMN IF NOT EXISTS conclusion_approved_by UUID REFERENCES users(id)",
+        "ALTER TABLE settler_tasks ADD COLUMN IF NOT EXISTS final_notes TEXT",
+    ];
+    for stmt in &alter_stmts {
+        sqlx::query(stmt)
+            .execute(db::get_db())
+            .await
+            .map_err(|e| format!("DB error: {}", e))?;
+    }
+    Ok(())
+}
+
+const SETTLER_TASK_SELECT: &str =
+    "SELECT id, title, description, status, assigned_to, assigned_by, settlement_id, due_date, \
+     progress_notes, activity_logs, created_at, conclusion_requested_at, conclusion_requested_by, \
+     conclusion_approved_at, conclusion_approved_by, final_notes FROM settler_tasks";
+
 #[tauri::command]
 pub async fn get_settlements(token: String) -> Result<Vec<serde_json::Value>, String> {
     let _session = validate_session_command(&token).await?;
@@ -81,14 +110,15 @@ pub async fn get_settlements(token: String) -> Result<Vec<serde_json::Value>, St
 #[tauri::command]
 pub async fn get_settler_tasks(token: String) -> Result<Vec<serde_json::Value>, String> {
     let session = validate_session_command(&token).await?;
+    ensure_settler_task_columns().await?;
 
     let rows = if permissions::has_permission(&session.role_name, "settler_commander") || session.tier >= 3 {
         sqlx::query_as::<_, SettlerTaskRow>(
-            "SELECT id, title, description, status, assigned_to, assigned_by, settlement_id, due_date, progress_notes, created_at FROM settler_tasks WHERE deleted_at IS NULL ORDER BY created_at DESC"
+            &format!("{} WHERE deleted_at IS NULL ORDER BY created_at DESC", SETTLER_TASK_SELECT),
         ).fetch_all(db::get_db()).await
     } else {
         sqlx::query_as::<_, SettlerTaskRow>(
-            "SELECT id, title, description, status, assigned_to, assigned_by, settlement_id, due_date, progress_notes, created_at FROM settler_tasks WHERE assigned_to = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
+            &format!("{} WHERE assigned_to = $1 AND deleted_at IS NULL ORDER BY created_at DESC", SETTLER_TASK_SELECT),
         ).bind(session.user_id).fetch_all(db::get_db()).await
     }.map_err(|e| format!("DB error: {}", e))?;
 
@@ -106,6 +136,7 @@ pub async fn assign_settler_task(
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
     require_role_name(&session, "settler_commander")?;
+    ensure_settler_task_columns().await?;
 
     let atid = Uuid::parse_str(&assigned_to).map_err(|_| "Invalid user ID".to_string())?;
     let sid = settlement_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
@@ -132,15 +163,248 @@ pub async fn update_task_progress(
     status: String,
 ) -> Result<(), String> {
     let session = validate_session_command(&token).await?;
+    ensure_settler_task_columns().await?;
     let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
 
-    sqlx::query("UPDATE settler_tasks SET progress_notes = $1, status = $2 WHERE id = $3 AND (assigned_to = $4 OR $5 >= 3) AND deleted_at IS NULL")
-        .bind(&progress_notes).bind(&status).bind(tid).bind(session.user_id).bind(session.tier)
+    let task: Option<(Option<Uuid>, Option<Uuid>, Option<String>)> = sqlx::query_as(
+        "SELECT assigned_to, assigned_by, status FROM settler_tasks WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(tid)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let (assigned_to, assigned_by, current_status) = task.ok_or_else(|| "Task not found".to_string())?;
+    let is_assigner = assigned_by.map(|id| id == session.user_id).unwrap_or(false);
+    let is_assignee = assigned_to.map(|id| id == session.user_id).unwrap_or(false);
+    let is_head = permissions::has_permission(&session.role_name, "settler_commander") || session.tier >= 3;
+
+    if !is_assigner && !is_assignee && !is_head {
+        return Err("You do not have permission to update this task".to_string());
+    }
+    if !is_assigner && !is_head && status == "completed" {
+        return Err("Only the task assigner can mark a task as completed".to_string());
+    }
+    if !is_assigner && !is_head && current_status.as_deref() == Some("conclusion_requested") {
+        return Err("Status cannot be changed while awaiting assigner review".to_string());
+    }
+
+    let log_entry = serde_json::json!([{
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "author_id": session.user_id.to_string(),
+        "author_name": session.full_name,
+        "content": format!("Status changed to '{}'{}",
+            status,
+            if progress_notes.is_empty() { "".to_string() } else { format!(": {}", progress_notes) }),
+        "log_type": "status_change"
+    }]);
+
+    sqlx::query("UPDATE settler_tasks SET progress_notes = $1, status = $2, activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $3 WHERE id = $4 AND deleted_at IS NULL")
+        .bind(&progress_notes).bind(&status).bind(&log_entry).bind(tid)
         .execute(db::get_db())
         .await
         .map_err(|e| format!("DB error: {}", e))?;
 
     let _ = write_audit_log(Some(session.user_id), "UPDATE_TASK_PROGRESS", Some("settler_tasks"), Some(tid), None, Some(serde_json::json!({ "status": status }))).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_settler_task(token: String, task_id: String) -> Result<serde_json::Value, String> {
+    let session = validate_session_command(&token).await?;
+    ensure_settler_task_columns().await?;
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
+
+    let row = sqlx::query_as::<_, SettlerTaskRow>(
+        &format!("{} WHERE id = $1 AND (assigned_to = $2 OR assigned_by = $2 OR $3 >= 3) AND deleted_at IS NULL", SETTLER_TASK_SELECT),
+    )
+    .bind(tid)
+    .bind(session.user_id)
+    .bind(session.tier)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    row.map(|r| serde_json::to_value(r).unwrap_or_default())
+        .ok_or_else(|| "Task not found".to_string())
+}
+
+#[tauri::command]
+pub async fn append_settler_task_activity_log(
+    token: String,
+    task_id: String,
+    content: String,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    ensure_settler_task_columns().await?;
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
+
+    let task: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT status FROM settler_tasks WHERE id = $1 AND (assigned_to = $2 OR assigned_by = $2 OR $3 >= 3) AND deleted_at IS NULL",
+    )
+    .bind(tid)
+    .bind(session.user_id)
+    .bind(session.tier)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    if task.is_none() {
+        return Err("Task not found or access denied".to_string());
+    }
+
+    let entry = serde_json::json!([{
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "author_id": session.user_id.to_string(),
+        "author_name": session.full_name,
+        "content": content,
+        "log_type": "progress_update"
+    }]);
+
+    sqlx::query(
+        "UPDATE settler_tasks SET activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $1 WHERE id = $2 AND deleted_at IS NULL",
+    )
+    .bind(&entry)
+    .bind(tid)
+    .execute(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "APPEND_SETTLER_TASK_LOG", Some("settler_tasks"), Some(tid), None, None).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn request_settler_task_conclusion(
+    token: String,
+    task_id: String,
+    notes: String,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    ensure_settler_task_columns().await?;
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
+
+    if notes.trim().is_empty() {
+        return Err("Conclusion notes are required".to_string());
+    }
+
+    let task: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT status FROM settler_tasks WHERE id = $1 AND assigned_to = $2 AND deleted_at IS NULL",
+    )
+    .bind(tid)
+    .bind(session.user_id)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    match task {
+        None => return Err("Task not found or not assigned to you".to_string()),
+        Some((status,)) => {
+            let s = status.as_deref().unwrap_or("pending");
+            if s == "conclusion_requested" || s == "completed" {
+                return Err("Task is already in conclusion or completed state".to_string());
+            }
+        }
+    }
+
+    let log_entry = serde_json::json!([{
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "author_id": session.user_id.to_string(),
+        "author_name": session.full_name,
+        "content": notes,
+        "log_type": "conclusion_requested"
+    }]);
+
+    sqlx::query(
+        "UPDATE settler_tasks SET status = 'conclusion_requested', \
+         conclusion_requested_at = NOW(), conclusion_requested_by = $1, \
+         final_notes = $2, \
+         activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $3 \
+         WHERE id = $4 AND deleted_at IS NULL",
+    )
+    .bind(session.user_id)
+    .bind(&notes)
+    .bind(&log_entry)
+    .bind(tid)
+    .execute(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "REQUEST_SETTLER_TASK_CONCLUSION", Some("settler_tasks"), Some(tid), None, None).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn review_settler_task_conclusion(
+    token: String,
+    task_id: String,
+    decision: String,
+    review_notes: Option<String>,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    ensure_settler_task_columns().await?;
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
+
+    let task: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT status FROM settler_tasks WHERE id = $1 AND assigned_by = $2 AND deleted_at IS NULL",
+    )
+    .bind(tid)
+    .bind(session.user_id)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    match &task {
+        None => return Err("Task not found or you are not the assigner".to_string()),
+        Some((status,)) => {
+            if status.as_deref() != Some("conclusion_requested") {
+                return Err("Task is not awaiting conclusion review".to_string());
+            }
+        }
+    }
+
+    let new_status = match decision.as_str() {
+        "approve" => "completed",
+        "reject" => "in_progress",
+        _ => return Err("Invalid decision. Use 'approve' or 'reject'".to_string()),
+    };
+
+    let log_type = if new_status == "completed" { "conclusion_approved" } else { "conclusion_rejected" };
+    let log_entry = serde_json::json!([{
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "author_id": session.user_id.to_string(),
+        "author_name": session.full_name,
+        "content": review_notes.as_deref().unwrap_or(""),
+        "log_type": log_type
+    }]);
+
+    if new_status == "completed" {
+        sqlx::query(
+            "UPDATE settler_tasks SET status = 'completed', \
+             conclusion_approved_at = NOW(), conclusion_approved_by = $1, \
+             activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $2 \
+             WHERE id = $3 AND deleted_at IS NULL",
+        )
+        .bind(session.user_id)
+        .bind(&log_entry)
+        .bind(tid)
+        .execute(db::get_db())
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+    } else {
+        sqlx::query(
+            "UPDATE settler_tasks SET status = 'in_progress', \
+             activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $1 \
+             WHERE id = $2 AND deleted_at IS NULL",
+        )
+        .bind(&log_entry)
+        .bind(tid)
+        .execute(db::get_db())
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+    }
+
+    let _ = write_audit_log(Some(session.user_id), "REVIEW_SETTLER_TASK_CONCLUSION", Some("settler_tasks"), Some(tid), None, Some(serde_json::json!({ "decision": decision }))).await;
     Ok(())
 }
 

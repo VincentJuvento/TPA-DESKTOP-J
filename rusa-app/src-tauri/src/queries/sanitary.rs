@@ -10,9 +10,35 @@ pub struct SanitaryTaskRow {
     pub status: Option<String>,
     pub assigned_to: Option<Uuid>,
     pub assigned_by: Option<Uuid>,
+    pub activity_logs: Option<serde_json::Value>,
     pub due_date: Option<chrono::NaiveDate>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub conclusion_requested_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub conclusion_requested_by: Option<Uuid>,
+    pub conclusion_approved_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub conclusion_approved_by: Option<Uuid>,
+    pub final_notes: Option<String>,
 }
+
+pub async fn ensure_sanitary_task_columns() -> Result<(), sqlx::Error> {
+    let alter_stmts = [
+        "ALTER TABLE sanitary_tasks ADD COLUMN IF NOT EXISTS activity_logs JSONB DEFAULT '[]'",
+        "ALTER TABLE sanitary_tasks ADD COLUMN IF NOT EXISTS conclusion_requested_at TIMESTAMPTZ",
+        "ALTER TABLE sanitary_tasks ADD COLUMN IF NOT EXISTS conclusion_requested_by UUID REFERENCES users(id)",
+        "ALTER TABLE sanitary_tasks ADD COLUMN IF NOT EXISTS conclusion_approved_at TIMESTAMPTZ",
+        "ALTER TABLE sanitary_tasks ADD COLUMN IF NOT EXISTS conclusion_approved_by UUID REFERENCES users(id)",
+        "ALTER TABLE sanitary_tasks ADD COLUMN IF NOT EXISTS final_notes TEXT",
+    ];
+    for stmt in &alter_stmts {
+        sqlx::query(stmt).execute(get_db()).await?;
+    }
+    Ok(())
+}
+
+const SANITARY_TASK_SELECT: &str =
+    "SELECT id, title, description, division, status, assigned_to, assigned_by, activity_logs, due_date, created_at, \
+     conclusion_requested_at, conclusion_requested_by, conclusion_approved_at, conclusion_approved_by, final_notes \
+     FROM sanitary_tasks";
 
 #[derive(sqlx::FromRow, serde::Serialize)]
 pub struct SanitaryInventoryRow {
@@ -77,7 +103,7 @@ pub struct InspectionReportRow {
 
 pub async fn get_all_sanitary_tasks() -> Result<Vec<SanitaryTaskRow>, sqlx::Error> {
     sqlx::query_as::<_, SanitaryTaskRow>(
-        "SELECT id, title, description, division, status, assigned_to, assigned_by, due_date, created_at FROM sanitary_tasks WHERE deleted_at IS NULL ORDER BY created_at DESC",
+        &format!("{} WHERE deleted_at IS NULL ORDER BY created_at DESC", SANITARY_TASK_SELECT),
     )
     .fetch_all(get_db())
     .await
@@ -85,10 +111,20 @@ pub async fn get_all_sanitary_tasks() -> Result<Vec<SanitaryTaskRow>, sqlx::Erro
 
 pub async fn get_user_sanitary_tasks(user_id: Uuid) -> Result<Vec<SanitaryTaskRow>, sqlx::Error> {
     sqlx::query_as::<_, SanitaryTaskRow>(
-        "SELECT id, title, description, division, status, assigned_to, assigned_by, due_date, created_at FROM sanitary_tasks WHERE assigned_to = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
+        &format!("{} WHERE assigned_to = $1 AND deleted_at IS NULL ORDER BY created_at DESC", SANITARY_TASK_SELECT),
     )
     .bind(user_id)
     .fetch_all(get_db())
+    .await
+}
+
+pub async fn get_sanitary_task_by_id(task_id: Uuid, user_id: Uuid) -> Result<Option<SanitaryTaskRow>, sqlx::Error> {
+    sqlx::query_as::<_, SanitaryTaskRow>(
+        &format!("{} WHERE id = $1 AND (assigned_to = $2 OR assigned_by = $2) AND deleted_at IS NULL", SANITARY_TASK_SELECT),
+    )
+    .bind(task_id)
+    .bind(user_id)
+    .fetch_optional(get_db())
     .await
 }
 
@@ -118,17 +154,106 @@ pub async fn update_sanitary_task_status(
     task_id: Uuid,
     status: &str,
     user_id: Uuid,
+    full_name: &str,
     role_name: &str,
 ) -> Result<(), sqlx::Error> {
+    let log_entry = serde_json::json!([{
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "author_id": user_id.to_string(),
+        "author_name": full_name,
+        "content": format!("Status changed to '{}'", status),
+        "log_type": "status_change"
+    }]);
     sqlx::query(
-        "UPDATE sanitary_tasks SET status = $1 WHERE id = $2 AND (assigned_to = $3 OR $4 = 'head_of_sanitary') AND deleted_at IS NULL",
+        "UPDATE sanitary_tasks SET status = $1, \
+         activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $2 \
+         WHERE id = $3 AND (assigned_to = $4 OR $5 = 'head_of_sanitary') AND deleted_at IS NULL",
     )
     .bind(status)
+    .bind(&log_entry)
     .bind(task_id)
     .bind(user_id)
     .bind(role_name)
     .execute(get_db())
     .await?;
+    Ok(())
+}
+
+pub async fn append_sanitary_task_log(task_id: Uuid, user_id: Uuid, full_name: &str, content: &str) -> Result<(), sqlx::Error> {
+    let entry = serde_json::json!([{
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "author_id": user_id.to_string(),
+        "author_name": full_name,
+        "content": content,
+        "log_type": "progress_update"
+    }]);
+    sqlx::query(
+        "UPDATE sanitary_tasks SET activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $1 WHERE id = $2 AND deleted_at IS NULL",
+    )
+    .bind(&entry)
+    .bind(task_id)
+    .execute(get_db())
+    .await?;
+    Ok(())
+}
+
+pub async fn request_sanitary_task_conclusion(task_id: Uuid, user_id: Uuid, full_name: &str, notes: &str) -> Result<(), sqlx::Error> {
+    let log_entry = serde_json::json!([{
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "author_id": user_id.to_string(),
+        "author_name": full_name,
+        "content": notes,
+        "log_type": "conclusion_requested"
+    }]);
+    sqlx::query(
+        "UPDATE sanitary_tasks SET status = 'conclusion_requested', \
+         conclusion_requested_at = NOW(), conclusion_requested_by = $1, \
+         final_notes = $2, \
+         activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $3 \
+         WHERE id = $4 AND deleted_at IS NULL",
+    )
+    .bind(user_id)
+    .bind(notes)
+    .bind(&log_entry)
+    .bind(task_id)
+    .execute(get_db())
+    .await?;
+    Ok(())
+}
+
+pub async fn review_sanitary_task_conclusion(task_id: Uuid, user_id: Uuid, full_name: &str, approve: bool, review_notes: Option<&str>) -> Result<(), sqlx::Error> {
+    let log_type = if approve { "conclusion_approved" } else { "conclusion_rejected" };
+    let log_entry = serde_json::json!([{
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "author_id": user_id.to_string(),
+        "author_name": full_name,
+        "content": review_notes.unwrap_or(""),
+        "log_type": log_type
+    }]);
+
+    if approve {
+        sqlx::query(
+            "UPDATE sanitary_tasks SET status = 'completed', \
+             conclusion_approved_at = NOW(), conclusion_approved_by = $1, \
+             activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $2 \
+             WHERE id = $3 AND deleted_at IS NULL",
+        )
+        .bind(user_id)
+        .bind(&log_entry)
+        .bind(task_id)
+        .execute(get_db())
+        .await?;
+    } else {
+        sqlx::query(
+            "UPDATE sanitary_tasks SET status = 'in_progress', \
+             activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $1 \
+             WHERE id = $2 AND deleted_at IS NULL",
+        )
+        .bind(&log_entry)
+        .bind(task_id)
+        .execute(get_db())
+        .await?;
+    }
     Ok(())
 }
 
