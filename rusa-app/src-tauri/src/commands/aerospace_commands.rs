@@ -143,21 +143,12 @@ pub async fn get_aerospace_assigned_tasks(token: String) -> Result<Vec<serde_jso
 
     ensure_aerospace_tasks_table().await?;
 
-    let rows = if session.tier >= 2 {
-        sqlx::query_as::<_, AerospaceTaskRow>(
-            "SELECT id, title, description, assigned_to, assigned_by, status, progress_notes, due_date, created_at, conclusion_requested_at, conclusion_requested_by, conclusion_approved_at, conclusion_approved_by, final_notes, final_findings, methodology_summary, key_results, recommendations, limitations FROM aerospace_assigned_tasks WHERE assigned_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
-        )
-        .bind(session.user_id)
-        .fetch_all(db::get_db())
-        .await
-    } else {
-        sqlx::query_as::<_, AerospaceTaskRow>(
-            "SELECT id, title, description, assigned_to, assigned_by, status, progress_notes, due_date, created_at, conclusion_requested_at, conclusion_requested_by, conclusion_approved_at, conclusion_approved_by, final_notes, final_findings, methodology_summary, key_results, recommendations, limitations FROM aerospace_assigned_tasks WHERE assigned_to = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
-        )
-        .bind(session.user_id)
-        .fetch_all(db::get_db())
-        .await
-    }
+    let rows = sqlx::query_as::<_, AerospaceTaskRow>(
+        "SELECT id, title, description, assigned_to, assigned_by, status, progress_notes, due_date, created_at, conclusion_requested_at, conclusion_requested_by, conclusion_approved_at, conclusion_approved_by, final_notes, final_findings, methodology_summary, key_results, recommendations, limitations FROM aerospace_assigned_tasks WHERE (assigned_by = $1 OR assigned_to = $1) AND deleted_at IS NULL ORDER BY created_at DESC",
+    )
+    .bind(session.user_id)
+    .fetch_all(db::get_db())
+    .await
     .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows

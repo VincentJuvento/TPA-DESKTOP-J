@@ -120,6 +120,9 @@
   const isDirector = $derived(($session?.tier ?? 0) >= 3);
   const isEngineer = $derived(canPerform($session, 'aerospace_engineer'));
 
+  const myAerospaceTasks = $derived(assignedTasks.filter((t: any) => t.assigned_to === $session?.user_id));
+  const assignedByMeTasks = $derived(assignedTasks.filter((t: any) => t.assigned_by === $session?.user_id && t.assigned_to !== $session?.user_id));
+
   onMount(async () => {
     const s = $session; if (!s) return;
     loading = true;
@@ -483,13 +486,13 @@
 
   {:else if activeTab === 'assigned_tasks'}
     <div class="section-bar">
-      <h2 class="section-title">{canAssignTasks ? 'Tasks I Assigned' : 'My Assigned Tasks'}</h2>
+      <h2 class="section-title">My Assigned Tasks</h2>
       {#if canAssignTasks}
         <button class="btn-primary" onclick={() => assignOpen = true}>+ Assign Task</button>
       {/if}
     </div>
-    {#if assignedTasks.length === 0}
-      <p class="empty">{canAssignTasks ? 'No tasks assigned yet.' : 'No tasks have been assigned to you.'}</p>
+    {#if myAerospaceTasks.length === 0}
+      <p class="empty">No tasks have been assigned to you.</p>
     {:else}
       <div class="table-wrap">
         <table class="data-table">
@@ -503,7 +506,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each assignedTasks as task}
+            {#each myAerospaceTasks as task}
               <tr>
                 <td>{task.title}</td>
                 <td><span class={statusBadgeClass(task.status)}>{task.status ?? '—'}</span></td>
@@ -523,6 +526,44 @@
           </tbody>
         </table>
       </div>
+    {/if}
+
+    {#if canAssignTasks}
+      <div class="section-bar" style="margin-top: 2rem;">
+        <h2 class="section-title">Tasks I Assigned</h2>
+      </div>
+      {#if assignedByMeTasks.length === 0}
+        <p class="empty">No tasks assigned yet.</p>
+      {:else}
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Status</th>
+                <th>Due Date</th>
+                <th>Progress Notes</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each assignedByMeTasks as task}
+                <tr>
+                  <td>{task.title}</td>
+                  <td><span class={statusBadgeClass(task.status)}>{task.status ?? '—'}</span></td>
+                  <td>{task.due_date ? new Date(task.due_date).toLocaleDateString() : '—'}</td>
+                  <td>{task.progress_notes ?? '—'}</td>
+                  <td class="actions-cell">
+                    {#if isDirector && task.status === 'conclusion_requested'}
+                      <button class="btn-small btn-approve" onclick={() => openConclusionApproval(task)}>Approve/Reject</button>
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
     {/if}
 
   {:else if activeTab === 'technical_reports'}

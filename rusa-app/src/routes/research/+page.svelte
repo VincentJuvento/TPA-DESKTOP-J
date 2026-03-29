@@ -102,6 +102,9 @@
     canPerform($session, 'the_taskmaster')
   );
 
+  const myResearchTasks = $derived(researchTasks.filter((t: any) => t.assigned_to === $session?.user_id));
+  const assignedByMeResearchTasks = $derived(researchTasks.filter((t: any) => t.assigned_by === $session?.user_id && t.assigned_to !== $session?.user_id));
+
   const isTaskmaster = $derived(canPerform($session, 'the_taskmaster'));
   const isObserver = $derived(canPerform($session, 'the_observer'));
   const isResearchEngineer = $derived(
@@ -529,13 +532,13 @@
     <Table columns={testCols} rows={tests} onRowClick={(r) => openReview(r, 'test')} />
   {:else if activeTab === 'research_tasks'}
     <div class="section-bar">
-      <h2 class="section-title">{canAssignResearchTasks ? 'Tasks I Assigned' : 'My Research Tasks'}</h2>
+      <h2 class="section-title">My Research Tasks</h2>
       {#if canAssignResearchTasks}
         <button class="btn-primary" onclick={() => assignTaskOpen = true}>+ Assign Task</button>
       {/if}
     </div>
-    {#if researchTasks.length === 0}
-      <p class="empty">{canAssignResearchTasks ? 'No research tasks assigned yet.' : 'No research tasks have been assigned to you.'}</p>
+    {#if myResearchTasks.length === 0}
+      <p class="empty">No research tasks have been assigned to you.</p>
     {:else}
       <div class="table-wrap">
         <table class="data-table">
@@ -549,14 +552,14 @@
             </tr>
           </thead>
           <tbody>
-            {#each researchTasks as task}
+            {#each myResearchTasks as task}
               <tr>
                 <td>{task.title}</td>
                 <td><span class={statusBadgeClass(task.status)}>{task.status ?? '—'}</span></td>
                 <td>{task.due_date ? new Date(task.due_date).toLocaleDateString() : '—'}</td>
                 <td>{task.result_notes ?? '—'}</td>
                 <td>
-                  {#if !canAssignResearchTasks && task.status === 'pending'}
+                  {#if task.status === 'pending' || task.status === 'in_progress'}
                     <button class="btn-small" onclick={() => openResultModal(task)}>Submit Result</button>
                   {/if}
                   {#if canAssignResearchTasks && task.status === 'result_submitted'}
@@ -568,6 +571,44 @@
           </tbody>
         </table>
       </div>
+    {/if}
+
+    {#if canAssignResearchTasks}
+      <div class="section-bar" style="margin-top: 2rem;">
+        <h2 class="section-title">Tasks I Assigned</h2>
+      </div>
+      {#if assignedByMeResearchTasks.length === 0}
+        <p class="empty">No research tasks assigned yet.</p>
+      {:else}
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Status</th>
+                <th>Due Date</th>
+                <th>Result Notes</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each assignedByMeResearchTasks as task}
+                <tr>
+                  <td>{task.title}</td>
+                  <td><span class={statusBadgeClass(task.status)}>{task.status ?? '—'}</span></td>
+                  <td>{task.due_date ? new Date(task.due_date).toLocaleDateString() : '—'}</td>
+                  <td>{task.result_notes ?? '—'}</td>
+                  <td>
+                    {#if task.status === 'result_submitted'}
+                      <button class="btn-small" onclick={() => completeTask(task)}>Mark Complete</button>
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
     {/if}
   {:else if activeTab === 'pending_conclusions'}
     <div class="section-bar">
