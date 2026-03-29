@@ -1,4 +1,4 @@
-## ✅ Mandatory System-Wide Integration Audit (Post-Migration 018)
+## ✅ Mandatory System-Wide Integration Audit (Post-Migration 021)
 
 This checklist is the release gate for this fix PR and must be fully completed before marking as **Done**.
 
@@ -19,6 +19,7 @@ JOIN roles r ON r.id = u.role_id
 WHERE hr.requested_by = u.id;
 ```
 
+- [ ] Migration 021 creates `data_analyst_tasks` table and backfills existing DATA category requests.
 - [ ] Migration applies cleanly on:
   - [ ] Fresh database
   - [ ] Existing/staging-like database with pre-existing rows
@@ -36,7 +37,8 @@ WHERE hr.requested_by = u.id;
   - `chemist`
 
   are assigned to `the_observer`.
-- [ ] All other requester roles route to `the_artificer`.
+- [ ] Rows with `category = 'DATA'` are assigned to `the_statistician`.
+- [ ] STEM roles (aerospace_engineer, mathematician, physicist) route to `the_artificer`.
 - [ ] `new_matter` constraint is present and enforced as intended.
 - [ ] No orphaned references or invalid enum/domain values introduced.
 

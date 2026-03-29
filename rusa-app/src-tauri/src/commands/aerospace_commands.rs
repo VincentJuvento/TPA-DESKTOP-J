@@ -734,9 +734,10 @@ pub async fn get_ship_details(token: String, ship_id: String) -> Result<serde_js
 
 // ─── Help Requests ───────────────────────────────────────────────────────────
 
-/// Submit a help request. Routing is determined by the requester's role:
-///   - aerospace_engineer → the_artificer
-///   - biological_engineer / agricultural_engineer → the_observer
+/// Submit a help request. Routing is determined first by category, then by the requester's role:
+///   - category = "DATA"                                    → the_statistician
+///   - aerospace_engineer / mathematician / physicist       → the_artificer
+///   - biological_engineer / agricultural_engineer / chemist → the_observer
 #[tauri::command]
 pub async fn submit_help_request(
     token: String,
@@ -750,12 +751,17 @@ pub async fn submit_help_request(
         return Err("Title is required".to_string());
     }
 
-    let assigned_proxy_director = match session.role_name.as_str() {
-        "aerospace_engineer" => "the_artificer",
-        "mathematician" => "the_artificer",
-        "biological_engineer" | "agricultural_engineer" | "chemist" => "the_observer",
-        _ => "the_artificer",
-    };
+    // Data requests are always routed to the statistician regardless of role.
+    let assigned_proxy_director =
+        if category.as_deref().map(|c| c.eq_ignore_ascii_case("DATA")) == Some(true) {
+            "the_statistician"
+        } else {
+            match session.role_name.as_str() {
+                "aerospace_engineer" | "mathematician" | "physicist" => "the_artificer",
+                "biological_engineer" | "agricultural_engineer" | "chemist" => "the_observer",
+                _ => "the_artificer",
+            }
+        };
 
     let row: (Uuid,) = sqlx::query_as(
         "INSERT INTO help_requests (requested_by, title, description, category, assigned_proxy_director, status) \
@@ -815,12 +821,13 @@ pub async fn get_help_requests(token: String) -> Result<Vec<serde_json::Value>, 
     // Batch fetch linked task details: collect task IDs grouped by task table.
     let mut aerospace_ids: Vec<Uuid> = Vec::new();
     let mut research_ids: Vec<Uuid> = Vec::new();
+    let mut data_analyst_ids: Vec<Uuid> = Vec::new();
     for row in &rows {
         if let Some(tid) = row.created_task_id {
-            if row.assigned_proxy_director == "the_artificer" {
-                aerospace_ids.push(tid);
-            } else {
-                research_ids.push(tid);
+            match row.assigned_proxy_director.as_str() {
+                "the_artificer" => aerospace_ids.push(tid),
+                "the_statistician" => data_analyst_ids.push(tid),
+                _ => research_ids.push(tid),
             }
         }
     }
@@ -852,6 +859,19 @@ pub async fn get_help_requests(token: String) -> Result<Vec<serde_json::Value>, 
         .unwrap_or_default();
         for t in tasks {
             task_map.insert(t.id, (t, "research"));
+        }
+    }
+
+    if !data_analyst_ids.is_empty() {
+        let tasks: Vec<LinkedTaskInfo> = sqlx::query_as(
+            "SELECT id, title, assigned_to, status FROM data_analyst_tasks WHERE id = ANY($1)",
+        )
+        .bind(&data_analyst_ids)
+        .fetch_all(db::get_db())
+        .await
+        .unwrap_or_default();
+        for t in tasks {
+            task_map.insert(t.id, (t, "data"));
         }
     }
 
@@ -1087,6 +1107,20 @@ pub async fn approve_help_request(
         .fetch_one(db::get_db())
         .await
         .map_err(|e| format!("DB error creating aerospace task: {}", e))?;
+        r.0
+    } else if proxy_director == "the_statistician" {
+        // the_statistician → data_analyst_tasks
+        let r: (Uuid,) = sqlx::query_as(
+            "INSERT INTO data_analyst_tasks (title, description, assigned_to, assigned_by, status) \
+             VALUES ($1, $2, $3, $4, 'pending') RETURNING id",
+        )
+        .bind(&title)
+        .bind(&description)
+        .bind(atid)
+        .bind(session.user_id)
+        .fetch_one(db::get_db())
+        .await
+        .map_err(|e| format!("DB error creating data analyst task: {}", e))?;
         r.0
     } else {
         // the_observer → research_tasks
