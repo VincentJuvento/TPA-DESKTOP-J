@@ -14,6 +14,7 @@ struct AerospaceTaskRow {
     assigned_by: Option<Uuid>,
     status: Option<String>,
     progress_notes: Option<String>,
+    activity_logs: Option<serde_json::Value>,
     due_date: Option<chrono::DateTime<chrono::Utc>>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
     conclusion_requested_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -98,6 +99,10 @@ async fn ensure_aerospace_tasks_table() -> Result<(), String> {
     .execute(db::get_db())
     .await
     .map_err(|e| format!("DB error creating table: {}", e))?;
+    sqlx::query("ALTER TABLE aerospace_assigned_tasks ADD COLUMN IF NOT EXISTS activity_logs JSONB DEFAULT '[]'")
+        .execute(db::get_db())
+        .await
+        .map_err(|e| format!("DB error adding activity_logs: {}", e))?;
     Ok(())
 }
 
@@ -152,7 +157,7 @@ pub async fn get_aerospace_assigned_tasks(token: String) -> Result<Vec<serde_jso
     ensure_aerospace_tasks_table().await?;
 
     let rows = sqlx::query_as::<_, AerospaceTaskRow>(
-        "SELECT id, title, description, assigned_to, assigned_by, status, progress_notes, due_date, created_at, conclusion_requested_at, conclusion_requested_by, conclusion_approved_at, conclusion_approved_by, final_notes, final_findings, methodology_summary, key_results, recommendations, limitations FROM aerospace_assigned_tasks WHERE (assigned_by = $1 OR assigned_to = $1) AND deleted_at IS NULL ORDER BY created_at DESC",
+        "SELECT id, title, description, assigned_to, assigned_by, status, progress_notes, activity_logs, due_date, created_at, conclusion_requested_at, conclusion_requested_by, conclusion_approved_at, conclusion_approved_by, final_notes, final_findings, methodology_summary, key_results, recommendations, limitations FROM aerospace_assigned_tasks WHERE (assigned_by = $1 OR assigned_to = $1) AND deleted_at IS NULL ORDER BY created_at DESC",
     )
     .bind(session.user_id)
     .fetch_all(db::get_db())
@@ -178,14 +183,47 @@ pub async fn update_aerospace_task_status(
 
     let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
 
+    let task: Option<(Option<Uuid>, Option<Uuid>, Option<String>)> = sqlx::query_as(
+        "SELECT assigned_to, assigned_by, status FROM aerospace_assigned_tasks WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(tid)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let (assigned_to, assigned_by, current_status) = task.ok_or_else(|| "Task not found".to_string())?;
+    let is_assigner = assigned_by.map(|id| id == session.user_id).unwrap_or(false);
+    let is_assignee = assigned_to.map(|id| id == session.user_id).unwrap_or(false);
+    let is_head = session.tier >= 3 || session.role_name == "the_taskmaster";
+
+    if !is_assigner && !is_assignee && !is_head {
+        return Err("You do not have permission to update this task".to_string());
+    }
+    if !is_assigner && !is_head && status == "completed" {
+        return Err("Only the task assigner can mark a task as completed".to_string());
+    }
+    if !is_assigner && !is_head && current_status.as_deref() == Some("conclusion_requested") {
+        return Err("Status cannot be changed while awaiting assigner review".to_string());
+    }
+
+    let log_entry = serde_json::json!([{
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "author_id": session.user_id.to_string(),
+        "author_name": session.full_name,
+        "content": format!("Status changed to '{}'{}",
+            status,
+            progress_notes.as_deref().map(|n| format!(": {}", n)).unwrap_or_default()),
+        "log_type": "status_change"
+    }]);
+
     sqlx::query(
-        "UPDATE aerospace_assigned_tasks SET status = $1, progress_notes = COALESCE($2, progress_notes) WHERE id = $3 AND (assigned_to = $4 OR $5 >= 2) AND deleted_at IS NULL",
+        "UPDATE aerospace_assigned_tasks SET status = $1, progress_notes = COALESCE($2, progress_notes), \
+         activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $3 WHERE id = $4 AND deleted_at IS NULL",
     )
     .bind(&status)
     .bind(&progress_notes)
+    .bind(&log_entry)
     .bind(tid)
-    .bind(session.user_id)
-    .bind(session.tier)
     .execute(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
@@ -200,6 +238,74 @@ pub async fn update_aerospace_task_status(
     )
     .await;
 
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_aerospace_task(token: String, task_id: String) -> Result<serde_json::Value, String> {
+    let session = validate_session_command(&token).await?;
+    ensure_aerospace_tasks_table().await?;
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
+
+    let row = sqlx::query_as::<_, AerospaceTaskRow>(
+        "SELECT id, title, description, assigned_to, assigned_by, status, progress_notes, activity_logs, due_date, created_at, conclusion_requested_at, conclusion_requested_by, conclusion_approved_at, conclusion_approved_by, final_notes, final_findings, methodology_summary, key_results, recommendations, limitations \
+         FROM aerospace_assigned_tasks WHERE id = $1 AND (assigned_to = $2 OR assigned_by = $2 OR $3 >= 3 OR $4 = 'the_taskmaster') AND deleted_at IS NULL",
+    )
+    .bind(tid)
+    .bind(session.user_id)
+    .bind(session.tier)
+    .bind(&session.role_name)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    row.map(|r| serde_json::to_value(r).unwrap_or_default())
+        .ok_or_else(|| "Task not found".to_string())
+}
+
+#[tauri::command]
+pub async fn append_aerospace_task_activity_log(
+    token: String,
+    task_id: String,
+    content: String,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    ensure_aerospace_tasks_table().await?;
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
+
+    let task: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT status FROM aerospace_assigned_tasks WHERE id = $1 AND (assigned_to = $2 OR assigned_by = $2 OR $3 >= 3 OR $4 = 'the_taskmaster') AND deleted_at IS NULL",
+    )
+    .bind(tid)
+    .bind(session.user_id)
+    .bind(session.tier)
+    .bind(&session.role_name)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    if task.is_none() {
+        return Err("Task not found or access denied".to_string());
+    }
+
+    let entry = serde_json::json!([{
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "author_id": session.user_id.to_string(),
+        "author_name": session.full_name,
+        "content": content,
+        "log_type": "progress_update"
+    }]);
+
+    sqlx::query(
+        "UPDATE aerospace_assigned_tasks SET activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $1 WHERE id = $2 AND deleted_at IS NULL",
+    )
+    .bind(&entry)
+    .bind(tid)
+    .execute(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "APPEND_AEROSPACE_TASK_LOG", Some("aerospace_assigned_tasks"), Some(tid), None, None).await;
     Ok(())
 }
 
@@ -540,6 +646,7 @@ pub async fn request_aerospace_task_conclusion(
 ) -> Result<(), String> {
     let session = validate_session_command(&token).await?;
     require_role_name(&session, "aerospace_engineer")?;
+    ensure_aerospace_tasks_table().await?;
 
     let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
 
@@ -547,9 +654,9 @@ pub async fn request_aerospace_task_conclusion(
         return Err("Final notes are required".to_string());
     }
 
-    // Verify this task is assigned to the requesting engineer
-    let row: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT id FROM aerospace_assigned_tasks WHERE id = $1 AND assigned_to = $2 AND deleted_at IS NULL",
+    // Verify this task is assigned to the requesting engineer and not already concluded
+    let row: Option<(Uuid, Option<String>)> = sqlx::query_as(
+        "SELECT id, status FROM aerospace_assigned_tasks WHERE id = $1 AND assigned_to = $2 AND deleted_at IS NULL",
     )
     .bind(tid)
     .bind(session.user_id)
@@ -557,16 +664,31 @@ pub async fn request_aerospace_task_conclusion(
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    if row.is_none() {
-        return Err("Task not found or not assigned to you".to_string());
+    match row {
+        None => return Err("Task not found or not assigned to you".to_string()),
+        Some((_id, status)) => {
+            let s = status.as_deref().unwrap_or("pending");
+            if s == "conclusion_requested" || s == "completed" {
+                return Err("Task is already in conclusion or completed state".to_string());
+            }
+        }
     }
+
+    let log_entry = serde_json::json!([{
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "author_id": session.user_id.to_string(),
+        "author_name": session.full_name,
+        "content": final_notes,
+        "log_type": "conclusion_requested"
+    }]);
 
     sqlx::query(
         "UPDATE aerospace_assigned_tasks SET status = 'conclusion_requested', \
          conclusion_requested_at = NOW(), conclusion_requested_by = $1, \
          final_notes = $2, final_findings = $3, methodology_summary = $4, \
-         key_results = $5, recommendations = $6, limitations = $7 \
-         WHERE id = $8 AND deleted_at IS NULL",
+         key_results = $5, recommendations = $6, limitations = $7, \
+         activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $8 \
+         WHERE id = $9 AND deleted_at IS NULL",
     )
     .bind(session.user_id)
     .bind(&final_notes)
@@ -575,6 +697,7 @@ pub async fn request_aerospace_task_conclusion(
     .bind(&key_results)
     .bind(&recommendations)
     .bind(&limitations)
+    .bind(&log_entry)
     .bind(tid)
     .execute(db::get_db())
     .await
@@ -603,6 +726,7 @@ pub async fn approve_aerospace_task_conclusion(
     review_notes: Option<String>,
 ) -> Result<(), String> {
     let session = validate_session_command(&token).await?;
+    ensure_aerospace_tasks_table().await?;
     // Requires director tier or the_taskmaster role
     if session.tier < 3 && session.role_name != "the_taskmaster" {
         return Err("Only directors (tier 3+) or The Taskmaster can approve task conclusions".to_string());
@@ -633,27 +757,45 @@ pub async fn approve_aerospace_task_conclusion(
 
     match decision.as_str() {
         "approve" => {
+            let log_entry = serde_json::json!([{
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+                "author_id": session.user_id.to_string(),
+                "author_name": session.full_name,
+                "content": review_notes.as_deref().unwrap_or(""),
+                "log_type": "conclusion_approved"
+            }]);
             sqlx::query(
                 "UPDATE aerospace_assigned_tasks SET status = 'completed', \
                  conclusion_approved_at = NOW(), conclusion_approved_by = $1, \
-                 progress_notes = COALESCE($2, progress_notes) \
-                 WHERE id = $3 AND deleted_at IS NULL",
+                 progress_notes = COALESCE($2, progress_notes), \
+                 activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $3 \
+                 WHERE id = $4 AND deleted_at IS NULL",
             )
             .bind(session.user_id)
             .bind(&review_notes)
+            .bind(&log_entry)
             .bind(tid)
             .execute(db::get_db())
             .await
             .map_err(|e| format!("DB error: {}", e))?;
         }
         "reject" => {
+            let log_entry = serde_json::json!([{
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+                "author_id": session.user_id.to_string(),
+                "author_name": session.full_name,
+                "content": review_notes.as_deref().unwrap_or(""),
+                "log_type": "conclusion_rejected"
+            }]);
             sqlx::query(
                 "UPDATE aerospace_assigned_tasks SET status = 'in_progress', \
                  conclusion_requested_at = NULL, conclusion_requested_by = NULL, \
-                 progress_notes = COALESCE($1, progress_notes) \
-                 WHERE id = $2 AND deleted_at IS NULL",
+                 progress_notes = COALESCE($1, progress_notes), \
+                 activity_logs = COALESCE(activity_logs, '[]'::jsonb) || $2 \
+                 WHERE id = $3 AND deleted_at IS NULL",
             )
             .bind(&review_notes)
+            .bind(&log_entry)
             .bind(tid)
             .execute(db::get_db())
             .await

@@ -223,10 +223,17 @@ export const astronautApi = {
 export const settlementApi = {
   getSettlements: (token: string) => invoke<any[]>('get_settlements', { token }),
   getTasks: (token: string) => invoke<any[]>('get_settler_tasks', { token }),
+  getTask: (token: string, taskId: string) => invoke<any>('get_settler_task', { token, taskId }),
   assignTask: (token: string, assignedTo: string, title: string, description?: string, dueDate?: string, settlementId?: string) =>
     invoke<string>('assign_settler_task', { token, assignedTo, title, description, dueDate, settlementId }),
   updateTaskProgress: (token: string, taskId: string, progressNotes: string, status: string) =>
     invoke<void>('update_task_progress', { token, taskId, progressNotes, status }),
+  appendTaskLog: (token: string, taskId: string, content: string) =>
+    invoke<void>('append_settler_task_activity_log', { token, taskId, content }),
+  requestTaskConclusion: (token: string, taskId: string, notes: string) =>
+    invoke<void>('request_settler_task_conclusion', { token, taskId, notes }),
+  reviewTaskConclusion: (token: string, taskId: string, decision: string, reviewNotes?: string) =>
+    invoke<void>('review_settler_task_conclusion', { token, taskId, decision, reviewNotes }),
   submitSupplyRequest: (token: string, settlementId?: string, title?: string, description?: string, items?: string) =>
     invoke<string>('submit_supply_request', { token, settlementId, title, description, items }),
   reviewSupplyRequest: (token: string, requestId: string, decision: string, notes?: string) =>
@@ -447,8 +454,11 @@ export const aerospaceApi = {
   assignTask: (token: string, assignedTo: string, title: string, description?: string, dueDate?: string) =>
     invoke<string>('assign_aerospace_task', { token, assignedTo, title, description, dueDate }),
   getAssignedTasks: (token: string) => invoke<any[]>('get_aerospace_assigned_tasks', { token }),
+  getTask: (token: string, taskId: string) => invoke<any>('get_aerospace_task', { token, taskId }),
   updateTaskStatus: (token: string, taskId: string, status: string, progressNotes?: string) =>
     invoke<void>('update_aerospace_task_status', { token, taskId, status, progressNotes }),
+  appendTaskLog: (token: string, taskId: string, content: string) =>
+    invoke<void>('append_aerospace_task_activity_log', { token, taskId, content }),
   submitBlueprintProposal: (token: string, shipName: string, blueprintDescription: string, designSpecs?: string, shipId?: string) =>
     invoke<string>('submit_blueprint_proposal', { token, shipName, blueprintDescription, designSpecs, shipId }),
   getBlueprintProposals: (token: string) => invoke<any[]>('get_blueprint_proposals', { token }),
