@@ -1,6 +1,8 @@
 use crate::auth::{permissions, require_role, require_role_name, validate_session_command};
 use crate::queries::auth::write_audit_log;
 use crate::queries::governance as governance_queries;
+use crate::queries::users as users_queries;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 #[tauri::command]
@@ -79,7 +81,42 @@ pub async fn get_votes(token: String) -> Result<Vec<serde_json::Value>, String> 
         .await
         .map_err(|e| format!("DB error: {}", e))?;
 
-    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
+    let mut name_cache: HashMap<Uuid, String> = HashMap::new();
+    let mut out = Vec::with_capacity(rows.len());
+
+    for mut row in rows {
+        let initiated_by_name = if let Some(uid) = row.initiated_by {
+            if let Some(cached) = name_cache.get(&uid) {
+                Some(cached.clone())
+            } else {
+                let resolved = users_queries::get_user_by_id(uid)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|u| u.full_name)
+                    .unwrap_or_else(|| uid.to_string());
+                name_cache.insert(uid, resolved.clone());
+                Some(resolved)
+            }
+        } else {
+            None
+        };
+
+        if let (Some(uid), Some(name), Some(desc)) = (row.initiated_by, initiated_by_name.as_ref(), row.description.as_ref()) {
+            let needle = format!("submitted by user {}", uid);
+            if desc.contains(&needle) {
+                row.description = Some(desc.replacen(&needle, &format!("submitted by {}", name), 1));
+            }
+        }
+
+        let mut value = serde_json::to_value(&row).unwrap_or_default();
+        if let Some(name) = initiated_by_name {
+            value["initiated_by_name"] = serde_json::Value::String(name);
+        }
+        out.push(value);
+    }
+
+    Ok(out)
 }
 
 #[tauri::command]

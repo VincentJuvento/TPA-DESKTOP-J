@@ -346,9 +346,9 @@ pub async fn submit_blueprint_proposal(
     // Auto-initiate a directors' vote for this blueprint proposal
     let vote_title = format!("Blueprint Proposal: {}", ship_name);
     let vote_desc = format!(
-        "Directors' vote required for blueprint proposal '{}' submitted by user {}. \
+        "Directors' vote required for blueprint proposal '{}' submitted by {}. \
          Description: {}",
-        ship_name, session.user_id, blueprint_description
+        ship_name, session.full_name, blueprint_description
     );
 
     let vote_id = governance_queries::insert_vote_typed(
