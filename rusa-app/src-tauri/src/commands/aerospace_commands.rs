@@ -62,6 +62,14 @@ struct HelpRequestRow {
     created_task_id: Option<Uuid>,
 }
 
+#[derive(sqlx::FromRow)]
+struct LinkedTaskInfo {
+    id: Uuid,
+    title: String,
+    assigned_to: Option<Uuid>,
+    status: Option<String>,
+}
+
 async fn ensure_aerospace_tasks_table() -> Result<(), String> {
     sqlx::query(
         r#"CREATE TABLE IF NOT EXISTS aerospace_assigned_tasks (
@@ -804,7 +812,84 @@ pub async fn get_help_requests(token: String) -> Result<Vec<serde_json::Value>, 
     }
     .map_err(|e| format!("DB error: {}", e))?;
 
-    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
+    // Batch fetch linked task details: collect task IDs grouped by task table.
+    let mut aerospace_ids: Vec<Uuid> = Vec::new();
+    let mut research_ids: Vec<Uuid> = Vec::new();
+    for row in &rows {
+        if let Some(tid) = row.created_task_id {
+            if row.assigned_proxy_director == "the_artificer" {
+                aerospace_ids.push(tid);
+            } else {
+                research_ids.push(tid);
+            }
+        }
+    }
+
+    // Build a map from task_id → LinkedTaskInfo for quick lookup.
+    let mut task_map: std::collections::HashMap<Uuid, (LinkedTaskInfo, &'static str)> =
+        std::collections::HashMap::new();
+
+    if !aerospace_ids.is_empty() {
+        let tasks: Vec<LinkedTaskInfo> = sqlx::query_as(
+            "SELECT id, title, assigned_to, status FROM aerospace_assigned_tasks WHERE id = ANY($1)",
+        )
+        .bind(&aerospace_ids)
+        .fetch_all(db::get_db())
+        .await
+        .unwrap_or_default();
+        for t in tasks {
+            task_map.insert(t.id, (t, "aerospace"));
+        }
+    }
+
+    if !research_ids.is_empty() {
+        let tasks: Vec<LinkedTaskInfo> = sqlx::query_as(
+            "SELECT id, title, assigned_to, status FROM research_tasks WHERE id = ANY($1)",
+        )
+        .bind(&research_ids)
+        .fetch_all(db::get_db())
+        .await
+        .unwrap_or_default();
+        for t in tasks {
+            task_map.insert(t.id, (t, "research"));
+        }
+    }
+
+    let mut results = Vec::with_capacity(rows.len());
+    for row in rows {
+        let mut val = serde_json::to_value(&row).unwrap_or_default();
+
+        if let (Some(tid), serde_json::Value::Object(ref mut map)) =
+            (row.created_task_id, &mut val)
+        {
+            if let Some((info, task_type)) = task_map.get(&tid) {
+                map.insert(
+                    "linked_task_title".to_string(),
+                    serde_json::Value::String(info.title.clone()),
+                );
+                map.insert(
+                    "linked_task_assigned_to".to_string(),
+                    info.assigned_to.map_or(serde_json::Value::Null, |u| {
+                        serde_json::Value::String(u.to_string())
+                    }),
+                );
+                map.insert(
+                    "linked_task_status".to_string(),
+                    info.status
+                        .clone()
+                        .map_or(serde_json::Value::Null, serde_json::Value::String),
+                );
+                map.insert(
+                    "linked_task_type".to_string(),
+                    serde_json::Value::String(task_type.to_string()),
+                );
+            }
+        }
+
+        results.push(val);
+    }
+
+    Ok(results)
 }
 
 /// Director marks a help request as in_review or closed (generic status update).
